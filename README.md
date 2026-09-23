@@ -267,7 +267,9 @@ Share `project/.env` and, if needed, `meal rec test/.env` through a private chan
 
 Do not push `.env` variants, service account JSON, email passwords, signing keys, credentials in `.npmrc`, logs containing emails or verification codes, or generated builds containing keys. The root `.gitignore` covers these common paths. Never include real user health records, locations, or account exports in fixtures or screenshots you publish.
 
-The current Git commit already contains a DeepSeek key and Gmail app password. Rotate exposed credentials before publishing; moving them into `.env` does not remove them from earlier commits. Older commits can contain additional credentials. Clean the history before sharing this existing repository, or publish a fresh repository containing only reviewed source files. Do not copy `.git` into a fresh repository.
+Credential values have been removed from the Git history prepared for publishing, while preserving the original commit messages and other code changes. Previously committed credentials must still be revoked or rotated. Any `HISTORICAL_*` entries in your private `project/.env` are retained only for reference and are not used by the app; do not reuse them.
+
+The original history is backed up locally in `.private-git-backup/original-history.bundle`. This backup contains the original secrets. The entire `.private-git-backup/` directory is ignored: never upload it to GitHub or share it with the group.
 
 `meal rec test/node_modules` and root `.expo` files were already tracked before these ignore rules. Ignore rules do not untrack existing files; omit these generated directories from a fresh repository.
 

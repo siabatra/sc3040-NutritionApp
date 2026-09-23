@@ -1,4 +1,5 @@
 # Private configuration (templates are safe to commit)
+.private-git-backup/
 .env
 .env.*
 !.env.example
