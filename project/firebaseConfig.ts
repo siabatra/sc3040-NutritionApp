@@ -1,18 +1,49 @@
 // firebaseConfig.ts
+import 'react-native-url-polyfill/auto';
+import { Platform } from 'react-native';
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  getAuth,
+  initializeAuth,
+  type Auth,
+} from '@firebase/auth';
+import { getFirestore, initializeFirestore } from 'firebase/firestore';
+import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
+
+const { getReactNativePersistence } = require('@firebase/auth');
 
 const firebaseConfig = {
-  apiKey: "REDACTED_CREDENTIAL",
-  authDomain: "sc2006-75145.firebaseapp.com",
-  projectId: "sc2006-75145",
-  storageBucket: "sc2006-75145.firebasestorage.app",
-  messagingSenderId: "293976246944",
-  appId: "1:293976246944:web:8111803c48e8aa710357c5",
-  measurementId: "G-CJ6KL48GM2"
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+let authInstance: Auth;
+
+if (Platform.OS === 'web') {
+  authInstance = getAuth(app);
+} else {
+  try {
+    authInstance = initializeAuth(app, {
+      persistence: getReactNativePersistence(ReactNativeAsyncStorage),
+    });
+  } catch {
+    authInstance = getAuth(app);
+  }
+}
+
+export const auth = authInstance;
+
+export const db =
+  Platform.OS === 'web'
+    ? getFirestore(app)
+    : initializeFirestore(app, {
+        experimentalForceLongPolling: true,
+        useFetchStreams: false,
+      });

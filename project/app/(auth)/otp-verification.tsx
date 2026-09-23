@@ -6,7 +6,7 @@ import globalStyles from '../styles/globalStyles';
 import axios from 'axios';
 
 // --- Server URL ---
-const SERVER_URL = 'http://172.20.10.2:4000'; // Use your actual server URL
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL; // Use your actual server URL
 // ---
 
 const OTPVerificationScreen: React.FC = () => {

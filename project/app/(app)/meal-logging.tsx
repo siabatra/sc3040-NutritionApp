@@ -8,6 +8,7 @@ import { auth, db } from '../../firebaseConfig';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ArrowLeft, Save, Calendar, Check } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
+import { fetchNutritionForFood } from '../../utils/nutritionApi';
 
 // For web platform compatibility, provide a DateTimePicker alternative
 const DateTimePickerWeb = ({ value, onChange, mode }: any) => {
@@ -35,14 +36,6 @@ const DateTimePickerWeb = ({ value, onChange, mode }: any) => {
     </View>
   );
 };
-
-interface NutritionData {
-  food_name?: string;
-  nf_calories: number;
-  nf_total_fat: number;
-  nf_total_carbohydrate: number;
-  nf_protein: number;
-}
 
 const MealLoggingScreen: React.FC = () => {
   const params = useLocalSearchParams();
@@ -102,24 +95,13 @@ const MealLoggingScreen: React.FC = () => {
     setFetchingNutrition(true);
     
     try {
-      const response = await fetch('https://trackapi.nutritionix.com/v2/natural/nutrients', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-app-id': 'REDACTED_CREDENTIAL',  // hardcoded API keys
-          'x-app-key': 'REDACTED_CREDENTIAL',  // hardcoded API keys
-        },
-        body: JSON.stringify({ query }),
-      });
-      
-      const data = await response.json();
-      
-      if (data.foods && data.foods.length > 0) {
-        const food = data.foods[0];
-        setCalories(Math.round(food.nf_calories || 0).toString());
-        setFat(Math.round(food.nf_total_fat || 0).toString());
-        setCarbs(Math.round(food.nf_total_carbohydrate || 0).toString());
-        setProtein(Math.round(food.nf_protein || 0).toString());
+      const nutritionData = await fetchNutritionForFood(query);
+
+      if (nutritionData) {
+        setCalories(Math.round(nutritionData.nf_calories || 0).toString());
+        setFat(Math.round(nutritionData.nf_total_fat || 0).toString());
+        setCarbs(Math.round(nutritionData.nf_total_carbohydrate || 0).toString());
+        setProtein(Math.round(nutritionData.nf_protein || 0).toString());
       }
     } catch (error) {
       console.error('Error fetching nutrition data:', error);

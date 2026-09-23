@@ -1,3 +1,13 @@
+import { loadEnvFile } from "node:process";
+import { fileURLToPath } from "node:url";
+
+try {
+  loadEnvFile(fileURLToPath(new URL("./.env", import.meta.url)));
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+}
+if (!process.env.DEEPSEEK_API_KEY) throw new Error("Set DEEPSEEK_API_KEY in meal rec test/.env");
+
 // meal-recommendation.mjs
 import OpenAI from "openai";
 import readline from "readline";
@@ -8,13 +18,13 @@ import { getFirestore, collection, getDocs } from "firebase/firestore";
 // 1. Firebase config
 // --------------------
 const firebaseConfig = {
-  apiKey: "REDACTED_CREDENTIAL",
-  authDomain: "sc2006-75145.firebaseapp.com",
-  projectId: "sc2006-75145",
-  storageBucket: "sc2006-75145.appspot.com",
-  messagingSenderId: "293976246944",
-  appId: "1:293976246944:web:8111803c48e8aa710357c5",
-  measurementId: "G-CJ6KL48GM2"
+  apiKey: process.env.FIREBASE_API_KEY,
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.FIREBASE_APP_ID,
+  measurementId: process.env.FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);
@@ -24,7 +34,7 @@ const db = getFirestore(app);
 // 2. OpenAI (DeepSeek) init
 // --------------------
 const openai = new OpenAI({
-  apiKey: "REDACTED_CREDENTIAL", // your DeepSeek key
+  apiKey: process.env.DEEPSEEK_API_KEY, // your DeepSeek key
   baseURL: "https://api.deepseek.com"
 });
 

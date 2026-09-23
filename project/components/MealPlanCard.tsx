@@ -11,7 +11,7 @@ import {
 } from 'lucide-react-native';
 import { ThemeContext } from '../context/ThemeContext';
 import { MealSlot } from '../types/mealPlanner';
-import * as Notifications from 'expo-notifications';
+import { scheduleMealReminder } from '../utils/notifications';
 
 let DateTimePicker: any;
 if (Platform.OS !== 'web') {
@@ -83,13 +83,7 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
         if (triggerDate <= now) {
           triggerDate.setDate(triggerDate.getDate() + 1);
         }
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: "Meal Reminder",
-            body: `Reminder for your ${slot.name} meal.`,
-          },
-          trigger: triggerDate,
-        });
+        await scheduleMealReminder(slot.name, triggerDate);
       }
     }
   };
@@ -104,13 +98,7 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
       if (dateObj <= now) {
         dateObj.setDate(dateObj.getDate() + 1);
       }
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "Meal Reminder",
-          body: `Reminder for your ${slot.name} meal.`,
-        },
-        trigger: dateObj,
-      });
+      await scheduleMealReminder(slot.name, dateObj);
     }
   };
 
@@ -298,13 +286,7 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
                 if (dateObj <= now) {
                   dateObj.setDate(dateObj.getDate() + 1);
                 }
-                await Notifications.scheduleNotificationAsync({
-                  content: {
-                    title: "Meal Reminder",
-                    body: `Reminder for your ${slot.name} meal.`,
-                  },
-                  trigger: dateObj,
-                });
+                await scheduleMealReminder(slot.name, dateObj);
               }
             }}
             style={{

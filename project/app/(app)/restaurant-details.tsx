@@ -6,31 +6,8 @@ import { auth, db } from '../../firebaseConfig';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { ArrowLeft, Heart, Plus, MapPin, ArrowUpRight, Search, X } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
-
-// Conditionally import MapView components
-let MapView: any;
-let Marker: any;
-let PROVIDER_GOOGLE: any;
-
-// Only import map components on native platforms
-if (Platform.OS !== 'web') {
-  try {
-    const ReactNativeMaps = require('react-native-maps');
-    MapView = ReactNativeMaps.default;
-    Marker = ReactNativeMaps.Marker;
-    PROVIDER_GOOGLE = ReactNativeMaps.PROVIDER_GOOGLE;
-  } catch (error) {
-    console.error('Failed to load react-native-maps:', error);
-  }
-}
-
-interface NutritionData {
-  food_name?: string;
-  nf_calories: number;
-  nf_total_fat: number;
-  nf_total_carbohydrate: number;
-  nf_protein: number;
-}
+import { MapView, Marker, PROVIDER_GOOGLE } from '../../utils/nativeMaps';
+import { fetchNutritionForFood, type NutritionData } from '../../utils/nutritionApi';
 
 interface MenuItem {
   id: string;
@@ -169,29 +146,7 @@ const RestaurantDetailsScreen: React.FC = () => {
     setFetchingNutrition(true);
     
     try {
-      const response = await fetch('https://trackapi.nutritionix.com/v2/natural/nutrients', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-app-id': 'REDACTED_CREDENTIAL',
-          'x-app-key': 'REDACTED_CREDENTIAL',
-        },
-        body: JSON.stringify({ query: foodName }),
-      });
-      
-      const data = await response.json();
-      
-      if (data.foods && data.foods.length > 0) {
-        return {
-          food_name: data.foods[0].food_name,
-          nf_calories: data.foods[0].nf_calories || 0,
-          nf_total_fat: data.foods[0].nf_total_fat || 0,
-          nf_total_carbohydrate: data.foods[0].nf_total_carbohydrate || 0,
-          nf_protein: data.foods[0].nf_protein || 0,
-        };
-      }
-      
-      return null;
+      return await fetchNutritionForFood(foodName);
     } catch (error) {
       console.error('Error fetching nutrition data:', error);
       return null;

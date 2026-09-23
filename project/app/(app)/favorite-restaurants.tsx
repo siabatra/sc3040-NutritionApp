@@ -28,7 +28,7 @@ const FavoriteRestaurantsScreen: React.FC = () => {
   const [favoriteRestaurants, setFavoriteRestaurants] = useState<RestaurantDetails[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [apiKey, setApiKey] = useState('REDACTED_CREDENTIAL');
+  const [apiKey, setApiKey] = useState(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY);
 
   useEffect(() => {
     fetchFavorites();

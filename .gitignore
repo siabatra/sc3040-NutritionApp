@@ -1,0 +1,24 @@
+# Private configuration (templates are safe to commit)
+.env
+.env.*
+!.env.example
+
+# Credentials and signing keys
+# Covers serviceAccountKey.json and serviceAccountKey.json.json at any depth
+serviceAccountKey*.json
+*firebase-adminsdk*.json
+*.pem
+*.key
+*.p12
+*.p8
+*.jks
+*.keystore
+*.mobileprovision
+.npmrc
+
+# Dependencies, generated builds and local state
+node_modules/
+.expo/
+dist/
+web-build/
+*.log

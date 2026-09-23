@@ -18,19 +18,7 @@ import { auth, db } from '../../firebaseConfig';
 import { doc, updateDoc, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
 import { Search, MapPin, Star, ArrowLeft, Heart } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
-
-// Conditionally import MapView components
-let MapView: any;
-let Marker: any;
-let PROVIDER_GOOGLE: any;
-
-// Only import map components on native platforms
-if (Platform.OS !== 'web') {
-  const ReactNativeMaps = require('react-native-maps');
-  MapView = ReactNativeMaps.default;
-  Marker = ReactNativeMaps.Marker;
-  PROVIDER_GOOGLE = ReactNativeMaps.PROVIDER_GOOGLE;
-}
+import { MapView, Marker, PROVIDER_GOOGLE } from '../../utils/nativeMaps';
 
 interface Restaurant {
   place_id: string;
@@ -68,7 +56,7 @@ const NearbyRestaurantsScreen: React.FC = () => {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [mapRegion, setMapRegion] = useState<Region | null>(null);
   const mapRef = useRef<any>(null);
-  const [apiKey, setApiKey] = useState('REDACTED_CREDENTIAL');
+  const [apiKey, setApiKey] = useState(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY);
   const [locationPermissionBlocked, setLocationPermissionBlocked] = useState(false);
   
   // Mock data for testing in case API fails

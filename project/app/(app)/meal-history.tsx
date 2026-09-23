@@ -18,25 +18,7 @@ import { auth, db } from '../../firebaseConfig';
 import { collection, query, where, orderBy, getDocs, deleteDoc, doc, updateDoc, Timestamp } from 'firebase/firestore';
 import { ArrowLeft, Trash2, CreditCard as Edit, X, Calendar, Filter, ChartBar as BarChart3, Map as MapIcon, List, ChevronDown } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
-
-// Conditionally import MapView components
-let MapView: any;
-let Marker: any;
-let Callout: any;
-let PROVIDER_GOOGLE: any;
-
-// Only import map components on native platforms
-if (Platform.OS !== 'web') {
-  try {
-    const ReactNativeMaps = require('react-native-maps');
-    MapView = ReactNativeMaps.default;
-    Marker = ReactNativeMaps.Marker;
-    Callout = ReactNativeMaps.Callout;
-    PROVIDER_GOOGLE = ReactNativeMaps.PROVIDER_GOOGLE;
-  } catch (error) {
-    console.error('Failed to load react-native-maps:', error);
-  }
-}
+import { MapView, Marker, Callout, PROVIDER_GOOGLE } from '../../utils/nativeMaps';
 
 interface MealLog {
   id: string;

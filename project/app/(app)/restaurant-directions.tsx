@@ -4,21 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Pla
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { ArrowLeft, Navigation, Car, Scaling as Walking, Bike } from 'lucide-react-native';
-
-// Conditionally import MapView components
-let MapView: any;
-let Marker: any;
-let Polyline: any;
-let PROVIDER_GOOGLE: any;
-
-// Only import map components on native platforms
-if (Platform.OS !== 'web') {
-  const ReactNativeMaps = require('react-native-maps');
-  MapView = ReactNativeMaps.default;
-  Marker = ReactNativeMaps.Marker;
-  Polyline = ReactNativeMaps.Polyline;
-  PROVIDER_GOOGLE = ReactNativeMaps.PROVIDER_GOOGLE;
-}
+import { MapView, Marker, Polyline, PROVIDER_GOOGLE } from '../../utils/nativeMaps';
 
 type TransportMode = 'driving' | 'walking' | 'bicycling';
 
@@ -55,7 +41,7 @@ const RestaurantDirectionsScreen: React.FC = () => {
   const [directions, setDirections] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [transportMode, setTransportMode] = useState<TransportMode>('driving');
-  const [apiKey, setApiKey] = useState('REDACTED_CREDENTIAL');
+  const [apiKey, setApiKey] = useState(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY);
   
   const restaurantLocation: Coordinates = {
     latitude: Number(latitude),

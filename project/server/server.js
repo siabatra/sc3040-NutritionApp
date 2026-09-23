@@ -1,3 +1,13 @@
+const path = require('node:path');
+try {
+  process.loadEnvFile(path.resolve(__dirname, '../.env'));
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+}
+if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  throw new Error('Set EMAIL_USER and EMAIL_PASS in project/.env');
+}
+
 // At the top of server.js
 const express = require('express');
 const nodemailer = require('nodemailer');
@@ -39,12 +49,12 @@ const otpStore = {};
 const OTP_EXPIRY_MINUTES = 5;
 
 // --- Nodemailer Setup ---
-// Use dotenv for real projects: require('dotenv').config();
+// Email credentials are loaded from project/.env.
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER || 'mealcare.ntu2@gmail.com', // Replace or use env var
-    pass: process.env.EMAIL_PASS || 'REDACTED_CREDENTIAL', // Replace with YOUR App Password or use env var
+    user: process.env.EMAIL_USER, // Replace or use env var
+    pass: process.env.EMAIL_PASS, // Replace with YOUR App Password or use env var
   },
 });
 
@@ -85,7 +95,6 @@ app.post('/send-otp', async (req, res) => {
   const otp = generateOTP();
   const expiryTime = Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000;
   otpStore[email] = { otp, expires: expiryTime };
-  console.log(`Generated OTP for ${email} (${purpose}): ${otp}`);
 
   const subject = purpose === 'reset'
       ? 'Your Password Reset Code'
@@ -94,7 +103,7 @@ app.post('/send-otp', async (req, res) => {
   const htmlBody = `<p>Your ${purpose === 'reset' ? 'password reset' : 'verification'} code is: <strong>${otp}</strong></p><p>This code will expire in ${OTP_EXPIRY_MINUTES} minutes.</p>`;
 
   const mailOptions = {
-    from: `"Your App Name" <${process.env.EMAIL_USER || 'mealcare.ntu2@gmail.com'}>`,
+    from: `"Your App Name" <${process.env.EMAIL_USER}>`,
     to: email,
     subject: subject,
     text: textBody,
@@ -133,7 +142,6 @@ app.post('/verify-otp', (req, res) => {
     console.log(`OTP verified successfully for ${email}`);
     res.json({ success: true, message: 'OTP verified successfully' });
   } else {
-    console.log(`Invalid OTP attempt for ${email}. Received: ${otp}, Expected: ${storedData.otp}`);
     res.status(400).json({ success: false, message: 'Invalid OTP.' });
   }
 });

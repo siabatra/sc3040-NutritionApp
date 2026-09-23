@@ -18,7 +18,7 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import axios from 'axios'; // Added for server calls
 
 // --- Ensure this is your correct server URL ---
-const SERVER_URL = 'http://172.20.10.2:4000'; 
+const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL; 
 // ---
 
 const SignUpScreen: React.FC = () => {
@@ -102,7 +102,7 @@ const SignUpScreen: React.FC = () => {
           // Step 3: Navigate to OTP verification screen, passing the email
           router.push({
             pathname: '/(auth)/otp-verification',
-            params: { email: email } // Pass email as parameter
+            params: { email: email, purpose: 'signup' }
           });
         } else {
           // Handle server-side error (e.g., email sending failed)

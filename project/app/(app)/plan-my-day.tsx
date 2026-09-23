@@ -33,25 +33,18 @@ import {
   CircleAlert as AlertCircle,
   Utensils
 } from 'lucide-react-native';
-import * as Notifications from 'expo-notifications';
 import { ThemeContext } from '../../context/ThemeContext';
 import MealPlanCard from '../../components/MealPlanCard';
 import { MealSlot } from '../../types/mealPlanner';
+import { configureNotifications } from '../../utils/notifications';
 
 //////////////////////////////////////////////////////////////////////////
 // DeepSeek Constants (Using DeepSeek API)
 //////////////////////////////////////////////////////////////////////////
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
-const DEEPSEEK_API_KEY = 'REDACTED_CREDENTIAL';
+const DEEPSEEK_API_KEY = process.env.EXPO_PUBLIC_DEEPSEEK_API_KEY;
 
-// Set notification handler for foreground notifications
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+configureNotifications();
 
 const PlanMyDayScreen: React.FC = () => {
   const { theme } = useContext(ThemeContext);
