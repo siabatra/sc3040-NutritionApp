@@ -3,7 +3,7 @@ import React, { useState, useContext } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Switch, Platform } from 'react-native';
 import {
   Clock,
-  Chrome as Home,
+  Home,
   UtensilsCrossed,
   Bell,
   Pizza,

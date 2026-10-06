@@ -1,1302 +1,316 @@
-// Dining Analytics Screen (app/(app)/dining-analytics.tsx)
-import React, { useState, useEffect, useContext } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  ActivityIndicator, 
-  ScrollView,
-  Dimensions,
-  Platform
-} from 'react-native';
-import { router } from 'expo-router';
-import { auth, db } from '../../firebaseConfig';
-import { collection, query, where, orderBy, getDocs, doc, getDoc } from 'firebase/firestore';
-import { 
-  ArrowLeft, 
-  ChevronDown,
-  Map as MapIcon
-} from 'lucide-react-native';
-import { 
-  LineChart, 
-  BarChart, 
-  PieChart 
-} from 'react-native-chart-kit';
+import React, { useCallback, useContext, useEffect, useState } from 'react';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { onAuthStateChanged } from 'firebase/auth';
+import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { BarChart, LineChart } from 'react-native-chart-kit';
+import Svg, { Circle, G } from 'react-native-svg';
+import { auth } from '../../firebaseConfig';
 import { ThemeContext } from '../../context/ThemeContext';
+import { adjacentAnalyticsPeriod, analyticsPeriodFor, subscribeAnalyticsRollup } from '../../utils/analytics';
+import { dateKey, shiftDate } from '../../functions/lib/reporting';
+import type { AnalyticsPeriodType, AnalyticsRollup, NutritionMetric } from '../../types/analytics';
 
-interface MealLog {
-  id: string;
-  foodName: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  date: Date;
-  mealType?: string;
-  location?: {
-    name: string;
-    type: string;
-  };
+const METRICS: NutritionMetric[] = ['calories', 'protein', 'carbs', 'fat'];
+const LABELS = { calories: 'Calories', protein: 'Protein', carbs: 'Carbs', fat: 'Fat' };
+const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'other'];
+const PERIOD_LABELS = { day: 'Daily', week: 'Weekly', month: 'Monthly', year: 'Yearly', '3months': '3 Months' };
+const TITLE = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+const number = (value: number) => Math.round(value * 10) / 10;
+const shortDate = (key: string) => new Date(`${key}T12:00:00Z`).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', timeZone: 'Asia/Singapore' });
+
+function DistributionChart({ data, dark, absolute = false }: { data: { name: string; value: number; color: string }[]; dark: boolean; absolute?: boolean }) {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  const circumference = 2 * Math.PI * 60;
+  let offset = 0;
+  return (
+    <View style={styles.distribution}>
+      <Svg width={160} height={160} accessibilityLabel="Distribution chart">
+        <G transform="rotate(-90 80 80)">
+          {data.filter((item) => item.value > 0).map((item) => {
+            const length = item.value / total * circumference;
+            const start = offset;
+            offset += length;
+            return <Circle key={item.name} cx={80} cy={80} r={60} fill="none" stroke={item.color} strokeWidth={28} strokeDasharray={`${length} ${circumference - length}`} strokeDashoffset={-start} />;
+          })}
+        </G>
+      </Svg>
+      <View style={styles.legend}>
+        {data.map((item) => <View key={item.name} style={styles.legendRow}><View style={[styles.swatch, { backgroundColor: item.color }]} /><Text style={[styles.text, dark && styles.textDark]}>{absolute ? item.value : `${number(item.value / total * 100)}%`} {item.name}</Text></View>)}
+      </View>
+    </View>
+  );
 }
 
-interface DailyNutrition {
-  date: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  mealCount: number;
-}
-
-interface WeeklyNutrition {
-  week: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  mealCount: number;
-}
-
-interface UserData {
-  dailyCalorieTarget?: number;
-}
-
-type DateRangeType = 'week' | 'month' | '3months' | 'year';
-
-// Slightly reduce the width for chart alignment
-const screenWidth = Dimensions.get('window').width - 50;
-
-const DiningAnalyticsScreen: React.FC = () => {
+export default function DiningAnalyticsScreen() {
   const { theme } = useContext(ThemeContext);
-  const isDark = theme === 'dark';
-  
-  const [mealHistory, setMealHistory] = useState<MealLog[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const dark = theme === 'dark';
+  const { width } = useWindowDimensions();
+  const chartWidth = Math.max(240, Math.min(width - 64, 680));
+  const [uid, setUid] = useState<string | null>(auth.currentUser?.uid || null);
+  const [period, setPeriod] = useState(() => analyticsPeriodFor(dateKey()!, 'day'));
+  const [metric, setMetric] = useState<NutritionMetric>('calories');
+  const [rollup, setRollup] = useState<AnalyticsRollup | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [subscriptionVersion, setSubscriptionVersion] = useState(0);
+  const textStyle = [styles.text, dark && styles.textDark];
+  const cardStyle = [styles.card, dark && styles.cardDark];
+  const unit = metric === 'calories' ? 'kcal' : 'g';
+  const currentPeriod = analyticsPeriodFor(dateKey()!, period.type);
+  const lastPeriodDate = shiftDate(period.endDate, -1);
+  const periodLabel = period.startDate.slice(0, 4) === lastPeriodDate.slice(0, 4)
+    ? `${shortDate(period.startDate)} to ${shortDate(lastPeriodDate)} ${lastPeriodDate.slice(0, 4)}`
+    : `${shortDate(period.startDate)} ${period.startDate.slice(0, 4)} to ${shortDate(lastPeriodDate)} ${lastPeriodDate.slice(0, 4)}`;
 
-  // Include '3months' in date range
-  const [dateRange, setDateRange] = useState<DateRangeType>('week');
-  const [showDateRangeDropdown, setShowDateRangeDropdown] = useState<boolean>(false);
+  useEffect(() => onAuthStateChanged(auth, (user) => {
+    setUid(user?.uid || null);
+  }), []);
 
-  const [dailyData, setDailyData] = useState<DailyNutrition[]>([]);
-  const [weeklyData, setWeeklyData] = useState<WeeklyNutrition[]>([]);
-  const [activeMetric, setActiveMetric] = useState<'calories' | 'protein' | 'carbs' | 'fat'>('calories');
-  const [userData, setUserData] = useState<UserData | null>(null);
-  const [insights, setInsights] = useState<string[]>([]);
-
-  const chartConfig = {
-    backgroundColor: isDark ? '#1e1e1e' : '#ffffff',
-    backgroundGradientFrom: isDark ? '#1e1e1e' : '#ffffff',
-    backgroundGradientTo: isDark ? '#1e1e1e' : '#ffffff',
-    decimalPlaces: 0,
-    color: (opacity = 1) => `rgba(46, 204, 113, ${opacity})`,
-    labelColor: (opacity = 1) =>
-      isDark ? `rgba(255, 255, 255, ${opacity})` : `rgba(0, 0, 0, ${opacity})`,
-    style: {
-      borderRadius: 16,
-    },
-    propsForDots: {
-      r: '5',
-      strokeWidth: '2',
-      stroke: '#2ecc71',
-    },
-    propsForLabels: {
-      fontSize: 10,
-      color: isDark ? '#f2f2f2' : '#333'
-    },
-  };
-
-  useEffect(() => {
-    fetchMealHistoryAndUserData();
-  }, []);
-
-  useEffect(() => {
-    if (mealHistory.length > 0) {
-      processMealData();
-    }
-  }, [mealHistory, dateRange]);
-
-  const fetchMealHistoryAndUserData = async () => {
-    if (!auth.currentUser) {
-      setLoading(false);
-      setError('You must be logged in to view analytics');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Fetch user’s meal logs for last year
-      const now = new Date();
-      const oneYearAgo = new Date(now);
-      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-      
-      const mealsQuery = query(
-        collection(db, 'mealLogs'),
-        where('userId', '==', auth.currentUser.uid),
-        where('date', '>=', oneYearAgo),
-        orderBy('date', 'asc')
-      );
-
-      const snapshot = await getDocs(mealsQuery);
-      const meals: MealLog[] = [];
-      snapshot.forEach((docSnapshot) => {
-        const data = docSnapshot.data();
-        const mealDate = data.date?.toDate ? data.date.toDate() : new Date(data.date);
-        meals.push({
-          id: docSnapshot.id,
-          foodName: data.foodName || '',
-          calories: data.calories || 0,
-          protein: data.protein || 0,
-          carbs: data.carbs || 0,
-          fat: data.fat || 0,
-          date: mealDate,
-          mealType: data.mealType || null,
-          location: data.location || { name: 'Custom meal', type: 'custom' }
-        });
-      });
-      
-      setMealHistory(meals);
-      
-      // Fetch user data (like dailyCalorieTarget)
-      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-      if (userDoc.exists()) {
-        setUserData(userDoc.data() as UserData);
-      }
-    } catch (err) {
-      console.error('Error fetching meal data:', err);
-      setError('Failed to fetch data. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const processMealData = () => {
-    const now = new Date();
-    let startDate: Date;
-
-    // Adjust logic for '3months'
-    if (dateRange === 'week') {
-      startDate = new Date(now);
-      startDate.setDate(startDate.getDate() - 7);
-    } else if (dateRange === 'month') {
-      startDate = new Date(now);
-      startDate.setMonth(startDate.getMonth() - 1);
-    } else if (dateRange === '3months') {
-      startDate = new Date(now);
-      startDate.setMonth(startDate.getMonth() - 3);
-    } else {
-      // year
-      startDate = new Date(now);
-      startDate.setFullYear(startDate.getFullYear() - 1);
-    }
-
-    const filteredMeals = mealHistory.filter(meal => meal.date >= startDate);
-    const dailyMap = new Map<string, DailyNutrition>();
-
-    filteredMeals.forEach(meal => {
-      const dateStr = meal.date.toISOString().split('T')[0];
-      if (!dailyMap.has(dateStr)) {
-        dailyMap.set(dateStr, {
-          date: dateStr,
-          calories: 0,
-          protein: 0,
-          carbs: 0,
-          fat: 0,
-          mealCount: 0
-        });
-      }
-      const day = dailyMap.get(dateStr);
-      day.calories += meal.calories;
-      day.protein += meal.protein;
-      day.carbs += meal.carbs;
-      day.fat += meal.fat;
-      day.mealCount += 1;
+  const load = useCallback(() => { setSubscriptionVersion((version) => version + 1); }, []);
+  useFocusEffect(useCallback(() => {
+    setLoading(true); setError(null); setRollup(null);
+    if (!uid) { setError('Please sign in to view your analytics.'); setLoading(false); return; }
+    return subscribeAnalyticsRollup(uid, period, (summary) => {
+      setRollup(summary); setError(null); setLoading(false);
+    }, (failure) => {
+      console.error('Analytics subscription failed:', failure.message);
+      setError('Unable to sync analytics. Please check your connection and retry.'); setLoading(false);
     });
+  }, [uid, period, subscriptionVersion]));
 
-    const sortedDailyData = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
-    setDailyData(sortedDailyData);
-
-    // For 'year', also compute weekly data
-    if (dateRange === 'year') {
-      const weeklyMap = new Map<string, WeeklyNutrition>();
-      filteredMeals.forEach(meal => {
-        const date = meal.date;
-        const startOfYear = new Date(date.getFullYear(), 0, 1);
-        const weekNum = Math.ceil((date.getTime() - startOfYear.getTime()) / 604800000);
-        const weekStr = `${date.getFullYear()}-W${weekNum.toString().padStart(2, '0')}`;
-        if (!weeklyMap.has(weekStr)) {
-          weeklyMap.set(weekStr, {
-            week: weekStr,
-            calories: 0,
-            protein: 0,
-            carbs: 0,
-            fat: 0,
-            mealCount: 0
-          });
-        }
-        const week = weeklyMap.get(weekStr);
-        week.calories += meal.calories;
-        week.protein += meal.protein;
-        week.carbs += meal.carbs;
-        week.fat += meal.fat;
-        week.mealCount += 1;
-      });
-      const sortedWeeklyData = Array.from(weeklyMap.values()).sort((a, b) => a.week.localeCompare(b.week));
-      setWeeklyData(sortedWeeklyData);
-    }
-
-    generateInsights(filteredMeals, dailyMap);
+  const config = {
+    backgroundGradientFrom: dark ? '#1e1e1e' : '#ffffff',
+    backgroundGradientTo: dark ? '#1e1e1e' : '#ffffff',
+    color: (opacity = 1) => `rgba(46, 204, 113, ${opacity})`,
+    labelColor: (opacity = 1) => dark ? `rgba(240, 240, 240, ${opacity})` : `rgba(50, 50, 50, ${opacity})`,
+    decimalPlaces: metric === 'calories' ? 0 : 1,
+    propsForDots: { r: '3' },
+    // Chart kit supplies SVG origins even for unrotated labels; its web adapter
+    // emits an unsupported DOM attribute under React 19. Native origins remain intact.
+    propsForLabels: { fontSize: 10, ...(Platform.OS === 'web' ? { origin: undefined } : {}) },
   };
 
-  const generateInsights = (meals: MealLog[], dailyData: Map<string, DailyNutrition>) => {
-    const generatedInsights: string[] = [];
-
-    if (meals.length === 0) {
-      generatedInsights.push("No meal data available for this period. Start logging your meals to see insights!");
-      setInsights(generatedInsights);
-      return;
-    }
-
-    // Summaries
-    const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
-    const totalProtein = meals.reduce((sum, meal) => sum + meal.protein, 0);
-    const totalCarbs = meals.reduce((sum, meal) => sum + meal.carbs, 0);
-    const totalFat = meals.reduce((sum, meal) => sum + meal.fat, 0);
-
-    const avgCaloriesPerDay = totalCalories / dailyData.size;
-    const avgProteinPerDay = totalProtein / dailyData.size;
-    const avgCarbsPerDay = totalCarbs / dailyData.size;
-    const avgFatPerDay = totalFat / dailyData.size;
-
-    // If user set a daily calorie target
-    if (userData?.dailyCalorieTarget) {
-      const targetCalories = userData.dailyCalorieTarget;
-      const percentOfTarget = Math.round((avgCaloriesPerDay / targetCalories) * 100);
-      if (percentOfTarget < 80) {
-        generatedInsights.push(`Your daily calorie intake (${Math.round(avgCaloriesPerDay)} cal) is ${100 - percentOfTarget}% below your target of ${targetCalories} cal.`);
-      } else if (percentOfTarget > 120) {
-        generatedInsights.push(`Your daily calorie intake (${Math.round(avgCaloriesPerDay)} cal) is ${percentOfTarget - 100}% above your target of ${targetCalories} cal.`);
-      } else {
-        generatedInsights.push(`Your daily calorie intake (${Math.round(avgCaloriesPerDay)} cal) is close to your target of ${targetCalories} cal.`);
-      }
-    } else {
-      generatedInsights.push(`Your average daily calorie intake is ${Math.round(avgCaloriesPerDay)} cal.`);
-    }
-
-    // Macro distribution
-    const totalMacroCalories = (avgProteinPerDay * 4) + (avgCarbsPerDay * 4) + (avgFatPerDay * 9);
-    if (totalMacroCalories > 0) {
-      const proteinPercentage = Math.round((avgProteinPerDay * 4 / totalMacroCalories) * 100);
-      const carbsPercentage = Math.round((avgCarbsPerDay * 4 / totalMacroCalories) * 100);
-      const fatPercentage = Math.round((avgFatPerDay * 9 / totalMacroCalories) * 100);
-      generatedInsights.push(`Your macro distribution is approximately ${proteinPercentage}% protein, ${carbsPercentage}% carbs, and ${fatPercentage}% fat.`);
-    }
-
-    // Meal type stats
-    const breakfastCount = meals.filter(meal => meal.mealType === 'breakfast').length;
-    const lunchCount = meals.filter(meal => meal.mealType === 'lunch').length;
-    const dinnerCount = meals.filter(meal => meal.mealType === 'dinner').length;
-    const snackCount = meals.filter(meal => meal.mealType === 'snack').length;
-    const skipBreakfastRate = Math.round((1 - breakfastCount / dailyData.size) * 100);
-
-    if (skipBreakfastRate > 50) {
-      generatedInsights.push(`You skipped breakfast on ${skipBreakfastRate}% of days. Consider adding a nutritious breakfast to your routine.`);
-    }
-    if (snackCount > (breakfastCount + lunchCount + dinnerCount) / 2) {
-      generatedInsights.push("You log snacks more frequently than regular meals. Try to focus on balanced main meals.");
-    }
-
-    // Restaurant vs home
-    const restaurantCount = meals.filter(meal => meal.location?.type === 'restaurant').length;
-    const restaurantPercentage = Math.round((restaurantCount / meals.length) * 100);
-    generatedInsights.push(`${restaurantPercentage}% of your meals were at restaurants. ${
-      restaurantPercentage > 50 
-        ? "Consider preparing more meals at home for better nutritional control." 
-        : "Good job balancing restaurant meals with home cooking!"
-    }`);
-
-    setInsights(generatedInsights);
+  const switchType = (type: AnalyticsPeriodType) => {
+    const anchor = period.id === currentPeriod.id ? dateKey()! : period.startDate;
+    setPeriod(analyticsPeriodFor(anchor, type));
   };
-
-  const formatDateLabel = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
-  const navigateToMapView = () => {
-    router.push('/(app)/meal-history');
-  };
-
-  const getAverageNutrition = () => {
-    if (dailyData.length === 0) return { calories: 0, protein: 0, carbs: 0, fat: 0 };
-    const totalCalories = dailyData.reduce((sum, day) => sum + day.calories, 0);
-    const totalProtein = dailyData.reduce((sum, day) => sum + day.protein, 0);
-    const totalCarbs = dailyData.reduce((sum, day) => sum + day.carbs, 0);
-    const totalFat = dailyData.reduce((sum, day) => sum + day.fat, 0);
-    return {
-      calories: Math.round(totalCalories / dailyData.length),
-      protein: Math.round(totalProtein / dailyData.length),
-      carbs: Math.round(totalCarbs / dailyData.length),
-      fat: Math.round(totalFat / dailyData.length)
-    };
-  };
-
-  const filterMealsByDateRange = () => {
-    const now = new Date();
-    let startDate: Date;
-    if (dateRange === 'week') {
-      startDate = new Date(now);
-      startDate.setDate(startDate.getDate() - 7);
-    } else if (dateRange === 'month') {
-      startDate = new Date(now);
-      startDate.setMonth(startDate.getMonth() - 1);
-    } else if (dateRange === '3months') {
-      startDate = new Date(now);
-      startDate.setMonth(startDate.getMonth() - 3);
-    } else {
-      // year
-      startDate = new Date(now);
-      startDate.setFullYear(startDate.getFullYear() - 1);
-    }
-    return mealHistory.filter(meal => meal.date >= startDate);
-  };
-
-  // Drop-down with higher zIndex to fix behind-component issue
-  const renderDateRangeSelector = () => (
-    <View style={[styles.dateRangeContainer]}>
-      <TouchableOpacity 
-        style={[styles.dateRangeSelector, isDark && styles.dateRangeSelectorDark]}
-        onPress={() => setShowDateRangeDropdown(!showDateRangeDropdown)}
-      >
-        <Text style={[styles.dateRangeText, isDark && styles.textLight]}>
-          {dateRange === 'week'
-            ? 'Last 7 Days'
-            : dateRange === 'month'
-            ? 'Last 30 Days'
-            : dateRange === '3months'
-            ? 'Last 3 Months'
-            : 'Last 12 Months'
-          }
-        </Text>
-        <ChevronDown size={16} color={isDark ? "#f2f2f2" : "#666"} />
-      </TouchableOpacity>
-
-      {showDateRangeDropdown && (
-        <View style={[
-          styles.dateRangeDropdown,
-          isDark && styles.dateRangeDropdownDark
-        ]}>
-          {/* 7 Days */}
-          <TouchableOpacity 
-            style={styles.dateRangeOption}
-            onPress={() => {
-              setDateRange('week');
-              setShowDateRangeDropdown(false);
-            }}
-          >
-            <Text
-              style={
-                dateRange === 'week'
-                  ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark]
-                  : [styles.optionText, isDark && styles.optionTextDark]
-              }
-            >
-              Last 7 Days
-            </Text>
-          </TouchableOpacity>
-
-          {/* 1 Month */}
-          <TouchableOpacity 
-            style={styles.dateRangeOption}
-            onPress={() => {
-              setDateRange('month');
-              setShowDateRangeDropdown(false);
-            }}
-          >
-            <Text
-              style={
-                dateRange === 'month'
-                  ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark]
-                  : [styles.optionText, isDark && styles.optionTextDark]
-              }
-            >
-              Last 30 Days
-            </Text>
-          </TouchableOpacity>
-
-          {/* 3 Months */}
-          <TouchableOpacity 
-            style={styles.dateRangeOption}
-            onPress={() => {
-              setDateRange('3months');
-              setShowDateRangeDropdown(false);
-            }}
-          >
-            <Text
-              style={
-                dateRange === '3months'
-                  ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark]
-                  : [styles.optionText, isDark && styles.optionTextDark]
-              }
-            >
-              Last 3 Months
-            </Text>
-          </TouchableOpacity>
-
-          {/* 1 Year */}
-          <TouchableOpacity 
-            style={styles.dateRangeOption}
-            onPress={() => {
-              setDateRange('year');
-              setShowDateRangeDropdown(false);
-            }}
-          >
-            <Text
-              style={
-                dateRange === 'year'
-                  ? [styles.selectedOptionText, isDark && styles.selectedOptionTextDark]
-                  : [styles.optionText, isDark && styles.optionTextDark]
-              }
-            >
-              Last 12 Months
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+  const metricValue = (value: number, missing: number) => `${number(value)} ${unit}${missing ? ' (partial)' : ''}`;
+  const plot = (title: string, labels: string[], datasets: { data: number[]; color: (opacity?: number) => string }[], legend: string[], suffix = '') => (
+    <View style={cardStyle}>
+      <Text style={[textStyle, styles.cardTitle]}>{title}</Text>
+      {labels.length > 1 ? (
+        <ScrollView horizontal>
+          <LineChart
+            data={{ labels: labels.map((label, index) => index % Math.max(1, Math.ceil(labels.length / 6)) === 0 ? label : ''), datasets, legend }}
+            width={chartWidth} height={225} chartConfig={config} fromZero yAxisSuffix={suffix} style={styles.chart} withDots={Platform.OS !== 'web'}
+          />
+        </ScrollView>
+      ) : labels.length === 1 ? <>
+        <Text style={textStyle}>{labels[0]}: {datasets.map((series, index) => `${legend[index]} ${number(series.data[0])}${suffix}`).join('; ')}.</Text>
+        <ScrollView horizontal><BarChart data={{ labels: legend, datasets: [{ data: datasets.map((series) => series.data[0]) }] }} width={chartWidth} height={220} chartConfig={config} fromZero yAxisLabel="" yAxisSuffix={suffix} /></ScrollView>
+        <Text style={textStyle}>Showing one entry date. Add more data to improve trend accuracy.</Text>
+      </> : <Text style={textStyle}>This series has no calculable values for the selected dates. Record a meal for nutrition trends; save a plan on the same date for plan comparisons and adherence.</Text>}
     </View>
   );
 
-  const renderMetricSelector = () => (
-    <View style={[styles.metricSelectorContainer, isDark && styles.metricSelectorContainerDark]}>
-      <TouchableOpacity 
-        style={[styles.metricButton, activeMetric === 'calories' && styles.activeMetricButton]}
-        onPress={() => setActiveMetric('calories')}
-      >
-        <Text
-          style={[
-            styles.metricText, 
-            isDark && styles.metricTextDark,
-            activeMetric === 'calories' && styles.activeMetricText
-          ]}
-        >
-          Calories
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity 
-        style={[styles.metricButton, activeMetric === 'protein' && styles.activeMetricButton]}
-        onPress={() => setActiveMetric('protein')}
-      >
-        <Text
-          style={[
-            styles.metricText, 
-            isDark && styles.metricTextDark,
-            activeMetric === 'protein' && styles.activeMetricText
-          ]}
-        >
-          Protein
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity 
-        style={[styles.metricButton, activeMetric === 'carbs' && styles.activeMetricButton]}
-        onPress={() => setActiveMetric('carbs')}
-      >
-        <Text
-          style={[
-            styles.metricText, 
-            isDark && styles.metricTextDark,
-            activeMetric === 'carbs' && styles.activeMetricText
-          ]}
-        >
-          Carbs
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity 
-        style={[styles.metricButton, activeMetric === 'fat' && styles.activeMetricButton]}
-        onPress={() => setActiveMetric('fat')}
-      >
-        <Text
-          style={[
-            styles.metricText, 
-            isDark && styles.metricTextDark,
-            activeMetric === 'fat' && styles.activeMetricText
-          ]}
-        >
-          Fat
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderAvgNutritionCard = () => {
-    const avg = getAverageNutrition();
+  const renderSummary = (data: AnalyticsRollup) => {
+    const actualPoints = data.daily.filter((day) => day.mealCount > 0 && !day.actualMissing[metric]);
+    const comparisonPoints = data.daily.filter((day) => day.hasPlan && day.plannedMealCount > 0 && !day.plannedMissing[metric] && !day.actualMissing[metric]);
+    const adherencePoints = data.daily.filter((day) => day.plannedMealCount > 0);
+    const macroColors = ['#3498db', '#f39c12', '#e74c3c'];
+    const macroData = (['protein', 'carbs', 'fat'] as const).map((name, index) => ({
+      name: TITLE(name), value: data.actual[name] * (name === 'fat' ? 9 : 4), color: macroColors[index], legendFontColor: dark ? '#eee' : '#333', legendFontSize: 12,
+    }));
+    const locationData = Object.entries(data.mealCountsByLocation).filter(([, count]) => count > 0).map(([name, count], index) => ({
+      name: name === 'custom' ? 'Custom/unspecified' : TITLE(name), value: count,
+      color: ['#ff6b6b', '#2ecc71', '#3498db', '#999'][index], legendFontColor: dark ? '#eee' : '#333', legendFontSize: 12,
+    }));
+    const gap = data.gaps[metric];
     return (
-      <View style={[styles.avgNutritionCard, isDark && styles.cardDark]}>
-        <Text style={[styles.cardTitle, isDark && styles.cardTitleDark]}>
-          Daily Average
-        </Text>
-        <View style={styles.avgNutritionGrid}>
-          <View style={styles.avgNutritionItem}>
-            <Text style={styles.avgNutritionValue}>
-              {avg.calories}
-            </Text>
-            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>
-              Calories
-            </Text>
+      <>
+        <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Summary status</Text>
+          <Text style={textStyle}>Last updated: {data.updatedAt ? data.updatedAt.toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) : 'Unavailable'} (Singapore time)</Text>
+          <Text style={textStyle}>{data.throughDate ? `Includes records through ${shortDate(data.throughDate)}.` : 'No dates in this period yet.'}</Text>
+          <Text style={textStyle}>Today's intake is included and may be incomplete. Totals and charts update automatically as new summaries arrive.</Text>
+          <Text style={textStyle}>{data.loggedDays} days with logs; {data.plannedDays} days with saved plans.</Text>
+          {data.missingRollupCount ? <Text style={textStyle}>{data.missingRollupCount} monthly summaries are unavailable. Available monthly values are shown as partial.</Text> : null}
+          <Text style={textStyle}>Missing logs are unknown intake. Comparisons describe recorded intake, and do not prove a meal was skipped.</Text>
+        </View>
+
+        {!data.plannedMealCount ? <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Save a plan to enable comparisons</Text>
+          <Text style={textStyle}>Your recorded meals are shown below. There are no identifiable saved planned meals for these dates, so planned calories, macro gaps and meal-plan adherence cannot be calculated. A calorie target is different from a saved meal plan.</Text>
+          <TouchableOpacity accessibilityRole="button" onPress={() => router.push('/(app)/plan-my-day')} style={styles.button}><Text style={styles.buttonText}>Create and save today's plan</Text></TouchableOpacity>
+        </View> : null}
+        <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Recorded nutrition</Text>
+          {METRICS.map((name) => (
+            <View key={name} style={styles.row}>
+              <Text style={textStyle}>{LABELS[name]}</Text>
+              <Text style={[textStyle, styles.value]}>{number(data.actual[name])} {name === 'calories' ? 'kcal' : 'g'}{data.actualMissing[name] ? ' (partial)' : ''}</Text>
+            </View>
+          ))}
+          {data.loggedDays ? <Text style={textStyle}>Average per logged day: {number(data.actual[metric] / data.loggedDays)} {unit}{data.actualMissing[metric] ? ' (partial)' : ''}.</Text> : <Text style={textStyle}>No recorded intake in this period.</Text>}
+          {METRICS.some((name) => data.actualMissing[name]) ? <Text style={textStyle}>Some records lack valid nutrition values. Available totals are shown; affected comparisons are unavailable.</Text> : null}
+        </View>
+
+        <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Planned versus recorded {LABELS[metric].toLowerCase()}</Text>
+          {data.comparableDays ? (
+            <>
+              <Text style={textStyle}>Compared across {data.comparableDays} days with identifiable planned meals.</Text>
+              <View style={styles.row}><Text style={textStyle}>Planned</Text><Text style={[textStyle, styles.value]}>{metricValue(data.planned[metric], data.plannedMissing[metric])}</Text></View>
+              <View style={styles.row}><Text style={textStyle}>Recorded on those days</Text><Text style={[textStyle, styles.value]}>{metricValue(data.comparableActual[metric], data.comparableActualMissing[metric])}</Text></View>
+              <View style={styles.row}><Text style={textStyle}>Recorded minus planned</Text><Text style={[textStyle, styles.value]}>{gap === null ? 'Unavailable' : `${gap > 0 ? '+' : ''}${number(gap)} ${unit}`}</Text></View>
+              {gap !== null && data.planned[metric] > 0 ? <Text style={textStyle}>{gap === 0 ? 'Recorded intake equals planned intake.' : `${number(Math.abs(gap) / data.planned[metric] * 100)}% ${gap < 0 ? 'below' : 'above'} planned intake.`}</Text> : null}
+            </>
+          ) : <><Text style={textStyle}>Recorded: {metricValue(data.actual[metric], data.actualMissing[metric])}</Text><Text style={textStyle}>Planned: no saved meal plan for these dates. Save a plan to calculate the difference.</Text></>}
+          {data.legacyMissingPlanCount ? <Text style={textStyle}>{data.legacyMissingPlanCount} older slots have lost their planned meal details. Comparisons and adherence cover identifiable meals only and are partial.</Text> : null}
+          {!data.legacyMissingPlanCount && !data.missingRollupCount && gap === null && data.comparableDays > 0 ? <Text style={textStyle}>This comparison needs valid {LABELS[metric].toLowerCase()} values for every relevant planned and recorded meal.</Text> : null}
+        </View>
+
+        <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Macronutrient gaps</Text>
+          <Text style={textStyle}>Planned and recorded intake on days with identifiable saved meals. Differences are recorded minus planned.</Text>
+          <View style={styles.row}>
+            <Text style={textStyle}>Macro</Text><Text style={textStyle}>Planned / Recorded / Difference</Text>
           </View>
-          <View style={styles.avgNutritionItem}>
-            <Text style={styles.avgNutritionValue}>
-              {avg.protein}g
-            </Text>
-            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>
-              Protein
-            </Text>
-          </View>
-          <View style={styles.avgNutritionItem}>
-            <Text style={styles.avgNutritionValue}>
-              {avg.carbs}g
-            </Text>
-            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>
-              Carbs
-            </Text>
-          </View>
-          <View style={styles.avgNutritionItem}>
-            <Text style={styles.avgNutritionValue}>
-              {avg.fat}g
-            </Text>
-            <Text style={[styles.avgNutritionLabel, isDark && styles.labelDark]}>
-              Fat
-            </Text>
-          </View>
+          {(['protein', 'carbs', 'fat'] as const).map((name) => (
+            <View key={name} style={styles.row}>
+              <Text style={textStyle}>{LABELS[name]}</Text>
+              <Text style={[textStyle, styles.value]}>{data.comparableDays ? `${number(data.planned[name])} g` : 'No plan'}{data.plannedMissing[name] ? ' (partial)' : ''} / {number(data.comparableDays ? data.comparableActual[name] : data.actual[name])} g{data.comparableActualMissing[name] ? ' (partial)' : ''} / {data.gaps[name] === null ? 'Unavailable' : `${data.gaps[name]! > 0 ? '+' : ''}${number(data.gaps[name]!)} g`}</Text>
+            </View>
+          ))}
+          <Text style={textStyle}>Negative values indicate a recorded shortfall; positive values indicate a recorded excess.</Text>
+          {data.comparableDays === 0 ? <Text style={textStyle}>No identifiable saved meals are available for comparison.</Text> : data.legacyMissingPlanCount > 0 ? <Text style={textStyle}>Older plan details are missing; these gaps compare identifiable planned meals only.</Text> : METRICS.some((name) => data.plannedMissing[name] || data.comparableActualMissing[name]) ? <Text style={textStyle}>Affected gaps are unavailable because nutrition values are missing or invalid.</Text> : null}
         </View>
-      </View>
-    );
-  };
 
-  const renderTrendChart = () => {
-    if (dateRange === 'year' && weeklyData.length > 0) {
-      // Weekly chart for the last year
-      const metricData = weeklyData.map(week => week[activeMetric]);
-      const labels = weeklyData.map((week, index) => 
-        index % Math.ceil(weeklyData.length / 5) === 0 ? week.week.split('-')[1].replace('W', '') : ''
-      );
-      const chartData = {
-        labels,
-        datasets: [
-          {
-            data: metricData,
-            color: (opacity = 1) => `rgba(46, 204, 113, ${opacity})`,
-            strokeWidth: 2
-          }
-        ],
-        legend: [`Weekly ${activeMetric.charAt(0).toUpperCase() + activeMetric.slice(1)}`]
-      };
-      return (
-        <View style={[styles.chartContainer, isDark && styles.cardDark]}>
-          <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>
-            {activeMetric.charAt(0).toUpperCase() + activeMetric.slice(1)} Trends
-          </Text>
-          <View style={styles.chartWrapper}>
-            <LineChart
-              data={chartData}
-              width={screenWidth}
-              height={220}
-              chartConfig={chartConfig}
-              bezier
-              style={styles.chart}
-            />
-          </View>
+        <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Confirmed meal-plan adherence</Text>
+          <Text style={[styles.highlight]}>{data.adherencePercent === null ? 'Unavailable' : `${number(data.adherencePercent)}%`}</Text>
+          <Text style={textStyle}>{data.followedMealCount} confirmed matches out of {data.plannedMealCount} identifiable planned meals; {data.linkedMealCount} meals were logged from the plan.</Text>
+          <Text style={textStyle}>A match is a same-day recorded meal with the planned dish and nutrition values. Manual logs must also match the meal type. Each recorded meal can confirm one planned slot. Missing logs remain unconfirmed.</Text>
+          {data.legacyMissingPlanCount > 0 && data.adherencePercent !== null ? <Text style={textStyle}>Partial adherence: slots without saved meal details are excluded.</Text> : null}
+          {data.adherencePercent === null ? <Text style={textStyle}>{data.missingRollupCount ? 'Some monthly summaries are unavailable; displayed comparisons cover the available summaries.' : data.legacyMissingPlanCount ? 'Older plan details are missing.' : 'No identifiable planned meals in this period.'}</Text> : null}
         </View>
-      );
-    } else if (dailyData.length > 0) {
-      // For week, month, and 3months, use daily data
-      const numberOfDays = dateRange === 'week' ? 7 : dateRange === 'month' ? 30 : 90;
-      const displayData = dailyData.slice(-numberOfDays);
-      const metricData = displayData.map(day => day[activeMetric]);
-      const labels = displayData.map((day, index) => 
-        index % Math.ceil(displayData.length / 5) === 0 ? formatDateLabel(day.date) : ''
-      );
-      const chartData = {
-        labels,
-        datasets: [
-          {
-            data: metricData,
-            color: (opacity = 1) => `rgba(46, 204, 113, ${opacity})`,
-            strokeWidth: 2
-          }
-        ],
-        legend: [`Daily ${activeMetric.charAt(0).toUpperCase() + activeMetric.slice(1)}`]
-      };
-      return (
-        <View style={[styles.chartContainer, isDark && styles.cardDark]}>
-          <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>
-            {activeMetric.charAt(0).toUpperCase() + activeMetric.slice(1)} Trends
-          </Text>
-          <View style={styles.chartWrapper}>
-            <LineChart
-              data={chartData}
-              width={screenWidth}
-              height={220}
-              chartConfig={chartConfig}
-              bezier
-              style={styles.chart}
-            />
-          </View>
+
+        {plot(`${LABELS[metric]} trends`, actualPoints.map((day) => shortDate(day.date)), [{ data: actualPoints.map((day) => day.actual[metric]), color: () => '#2ecc71' }], ['Recorded'], metric === 'calories' ? '' : 'g')}
+        {plot('Planned versus recorded trends', comparisonPoints.map((day) => shortDate(day.date)), [
+          { data: comparisonPoints.map((day) => day.planned[metric]), color: () => '#3498db' },
+          { data: comparisonPoints.map((day) => day.actual[metric]), color: () => '#2ecc71' },
+        ], ['Planned', 'Recorded'])}
+        {plot(`Recorded minus planned ${LABELS[metric].toLowerCase()} trends`, comparisonPoints.map((day) => shortDate(day.date)), [{
+          data: comparisonPoints.map((day) => day.deviation?.[metric] ?? day.actual[metric] - day.planned[metric]), color: () => '#9b59b6',
+        }], ['Deviation'], metric === 'calories' ? ' kcal' : ' g')}
+        <Text style={[textStyle, { marginBottom: 16 }]}>Deviation above zero means recorded excess; below zero means recorded shortfall. Dates without identifiable plans or complete nutrition are omitted.</Text>
+        {plot('Confirmed adherence trends', adherencePoints.map((day) => shortDate(day.date)), [{ data: adherencePoints.map((day) => day.followedMealCount / day.plannedMealCount * 100), color: () => '#2ecc71' }], ['Confirmed matches'], '%')}
+
+        <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Calories by meal type</Text>
+          {data.mealCount ? (
+            <>
+              <ScrollView horizontal><BarChart data={{ labels: MEAL_TYPES.map(TITLE), datasets: [{ data: MEAL_TYPES.map((type) => data.caloriesByMealType[type] || 0) }] }} width={chartWidth} height={220} chartConfig={config} fromZero yAxisLabel="" yAxisSuffix="" /></ScrollView>
+              {MEAL_TYPES.map((type) => <Text key={type} style={textStyle}>{TITLE(type)}: {number(data.caloriesByMealType[type] || 0)} kcal{data.actual.calories > 0 ? ` (${number((data.caloriesByMealType[type] || 0) / data.actual.calories * 100)}%)` : ''}</Text>)}
+              {data.actualMissing.calories > 0 ? <Text style={textStyle}>Partial breakdown: some meals lack valid calorie values.</Text> : null}
+            </>
+          ) : <Text style={textStyle}>No meal logs in this period.</Text>}
         </View>
-      );
-    }
-    return (
-      <View style={[styles.emptyChartContainer, isDark && styles.cardDark]}>
-        <Text style={[styles.emptyChartText, isDark && styles.emptyChartTextDark]}>
-          Not enough data to display trends
-        </Text>
-      </View>
-    );
-  };
 
-  const renderMacroDistributionChart = () => {
-    if (dailyData.length === 0) {
-      return (
-        <View style={[styles.emptyChartContainer, isDark && styles.cardDark]}>
-          <Text style={[styles.emptyChartText, isDark && styles.emptyChartTextDark]}>
-            Not enough data to display macro distribution
-          </Text>
+        <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Macro distribution (calories)</Text>
+          {macroData.some((item) => item.value > 0) ? <DistributionChart data={macroData} dark={dark} /> : <Text style={textStyle}>No macronutrient data in this period.</Text>}
+          {(['protein', 'carbs', 'fat'] as const).some((name) => data.actualMissing[name]) ? <Text style={textStyle}>Partial distribution: some records lack macro values.</Text> : null}
         </View>
-      );
-    }
-    const avg = getAverageNutrition();
-    const proteinCalories = avg.protein * 4;
-    const carbsCalories = avg.carbs * 4;
-    const fatCalories = avg.fat * 9;
-    const totalCalories = proteinCalories + carbsCalories + fatCalories;
-
-    if (totalCalories === 0) {
-      return (
-        <View style={[styles.emptyChartContainer, isDark && styles.cardDark]}>
-          <Text style={[styles.emptyChartText, isDark && styles.emptyChartTextDark]}>
-            Not enough data to display macro distribution
-          </Text>
+        <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Personalised insights</Text>
+          {data.insightsVersion === 1 && data.insights?.length ? data.insights.map((insight) => (
+            <View key={insight.id} style={{ marginBottom: 12 }}>
+              <Text style={[textStyle, styles.value, { textAlign: 'left' }]}>{insight.title}</Text>
+              <Text style={textStyle}>{insight.message}</Text>
+            </View>
+          )) : <Text style={textStyle}>Insights will appear after the next backend summary update.</Text>}
+          {data.missingRollupCount ? <Text style={textStyle}>These observations cover available monthly summaries only.</Text> : null}
         </View>
-      );
-    }
-    const data = [
-      {
-        name: 'Protein',
-        value: proteinCalories,
-        color: '#3498db',
-        legendFontColor: isDark ? '#f2f2f2' : '#333',
-        legendFontSize: 12
-      },
-      {
-        name: 'Carbs',
-        value: carbsCalories,
-        color: '#f39c12',
-        legendFontColor: isDark ? '#f2f2f2' : '#333',
-        legendFontSize: 12
-      },
-      {
-        name: 'Fat',
-        value: fatCalories,
-        color: '#e74c3c',
-        legendFontColor: isDark ? '#f2f2f2' : '#333',
-        legendFontSize: 12
-      }
-    ];
-    return (
-      <View style={[styles.chartContainer, isDark && styles.cardDark]}>
-        <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>
-          Macro Distribution (Calories)
-        </Text>
-        <PieChart
-          data={data}
-          width={screenWidth}
-          height={220}
-          chartConfig={chartConfig}
-          accessor="value"
-          backgroundColor="transparent"
-          paddingLeft="30"
-          absolute
-        />
-      </View>
-    );
-  };
-
-  const renderMealLocationChart = () => {
-    const meals = filterMealsByDateRange();
-    const restaurantCount = meals.filter(meal => meal.location?.type === 'restaurant').length;
-    const homeCount = meals.filter(meal => meal.location?.type === 'custom').length;
-
-    if (meals.length === 0 || (restaurantCount === 0 && homeCount === 0)) {
-      return (
-        <View style={[styles.emptyChartContainer, isDark && styles.cardDark]}>
-          <Text style={[styles.emptyChartText, isDark && styles.emptyChartTextDark]}>
-            Not enough data to display meal locations
-          </Text>
+        <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Meal counts by type</Text>
+          {MEAL_TYPES.map((type) => <View key={type} style={styles.row}><Text style={textStyle}>{TITLE(type)}</Text><Text style={[textStyle, styles.value]}>{data.mealCountsByType[type] || 0}</Text></View>)}
         </View>
-      );
-    }
-    const data = [
-      {
-        name: 'Restaurant',
-        value: restaurantCount,
-        color: '#ff6b6b',
-        legendFontColor: isDark ? '#f2f2f2' : '#333',
-        legendFontSize: 12
-      },
-      {
-        name: 'Home',
-        value: homeCount,
-        color: '#2ecc71',
-        legendFontColor: isDark ? '#f2f2f2' : '#333',
-        legendFontSize: 12
-      }
-    ];
-    return (
-      <View style={[styles.chartContainer, isDark && styles.cardDark]}>
-        <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>
-          Meal Location Distribution
-        </Text>
-        <PieChart
-          data={data}
-          width={screenWidth}
-          height={220}
-          chartConfig={chartConfig}
-          accessor="value"
-          backgroundColor="transparent"
-          paddingLeft="30"
-          absolute
-        />
-        <TouchableOpacity 
-          style={styles.viewMapButton}
-          onPress={navigateToMapView}
-        >
-          <MapIcon size={16} color="#fff" />
-          <Text style={styles.viewMapButtonText}>View Location Map</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
-  const renderMealCountByTypeChart = () => {
-    const meals = filterMealsByDateRange();
-    const breakfastCount = meals.filter(meal => meal.mealType === 'breakfast').length;
-    const lunchCount = meals.filter(meal => meal.mealType === 'lunch').length;
-    const dinnerCount = meals.filter(meal => meal.mealType === 'dinner').length;
-    const snackCount = meals.filter(meal => meal.mealType === 'snack').length;
-    const otherCount = meals.filter(meal => !meal.mealType).length;
-
-    if (meals.length === 0) {
-      return (
-        <View style={[styles.emptyChartContainer, isDark && styles.cardDark]}>
-          <Text style={[styles.emptyChartText, isDark && styles.emptyChartTextDark]}>
-            Not enough data to display meal types
-          </Text>
+        <View style={cardStyle}>
+          <Text style={[textStyle, styles.cardTitle]}>Meal locations</Text>
+          {locationData.length ? <DistributionChart data={locationData} dark={dark} absolute /> : <Text style={textStyle}>No meal locations in this period.</Text>}
+          <TouchableOpacity accessibilityRole="button" onPress={() => router.push('/(app)/meal-history')} style={styles.button}><Text style={styles.buttonText}>View meal history and map</Text></TouchableOpacity>
         </View>
-      );
-    }
-    const data = {
-      labels: ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Other'],
-      datasets: [
-        {
-          data: [breakfastCount, lunchCount, dinnerCount, snackCount, otherCount],
-        }
-      ]
-    };
-    return (
-      <View style={[styles.chartContainer, isDark && styles.cardDark]}>
-        <Text style={[styles.chartTitle, isDark && styles.cardTitleDark]}>
-          Meal Distribution by Type
-        </Text>
-        <BarChart
-          data={data}
-          width={screenWidth}
-          height={220}
-          chartConfig={{
-            ...chartConfig,
-            barPercentage: 0.7,
-          }}
-          style={styles.chart}
-          fromZero
-        />
-      </View>
-    );
-  };
-
-  const renderInsights = () => {
-    if (insights.length === 0) {
-      return (
-        <View style={[styles.emptyInsightsContainer, isDark && styles.cardDark]}>
-          <Text style={[styles.emptyInsightsText, isDark && styles.emptyInsightsTextDark]}>
-            Log more meals to receive personalized insights about your nutrition patterns.
-          </Text>
-        </View>
-      );
-    }
-    return (
-      <View style={[styles.insightsContainer, isDark && styles.cardDark]}>
-        <Text style={[styles.insightsTitle, isDark && styles.cardTitleDark]}>
-          Personalized Insights
-        </Text>
-        {insights.map((insight, index) => (
-          <View key={index} style={[styles.insightItem, isDark && styles.insightItemDark]}>
-            <Text style={[styles.insightText, isDark && styles.insightTextDark]}>
-              {insight}
-            </Text>
-          </View>
-        ))}
-      </View>
+      </>
     );
   };
 
   return (
-    <View style={[styles.container, isDark && styles.containerDark]}>
-      <View style={[styles.header, isDark && styles.headerDark]}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <ArrowLeft size={24} color="#2ecc71" />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, isDark && styles.textLight]}>
-          Nutrition Analytics
-        </Text>
-        {renderDateRangeSelector()}
+    <View style={[styles.container, dark && styles.containerDark]}>
+      <View style={[styles.header, dark && styles.cardDark]}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={styles.iconButton}><ArrowLeft size={24} color="#2ecc71" /></TouchableOpacity>
+        <Text style={[textStyle, styles.title]}>Nutrition Analytics</Text>
       </View>
-
-      {loading ? (
-        <View style={[styles.loadingContainer, isDark && styles.loadingContainerDark]}>
-          <ActivityIndicator size="large" color="#2ecc71" />
-          <Text style={[styles.loadingText, isDark && styles.textLight]}>
-            Loading analytics...
-          </Text>
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={cardStyle}>
+          <View style={styles.controls}>
+            {(['day', 'week', 'month', 'year'] as const).map((type) => <TouchableOpacity key={type} accessibilityRole="button" accessibilityState={{ selected: period.type === type }} onPress={() => switchType(type)} style={[styles.periodButton, period.type === type && styles.selectedButton]}><Text style={period.type === type ? styles.buttonText : textStyle}>{PERIOD_LABELS[type]}</Text></TouchableOpacity>)}
+          </View>
+          <View style={styles.controls}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Previous period" onPress={() => setPeriod(adjacentAnalyticsPeriod(period, -1))} style={styles.iconButton}><ChevronLeft color="#2ecc71" /></TouchableOpacity>
+            <Text style={[textStyle, styles.periodLabel]}>{periodLabel}</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Next period" accessibilityState={{ disabled: period.startDate >= currentPeriod.startDate }} disabled={period.startDate >= currentPeriod.startDate} onPress={() => {
+              const next = adjacentAnalyticsPeriod(period, 1);
+              setPeriod(next.startDate > currentPeriod.startDate ? currentPeriod : next);
+            }} style={styles.iconButton}><ChevronRight color={period.startDate >= currentPeriod.startDate ? '#999' : '#2ecc71'} /></TouchableOpacity>
+          </View>
+          {period.id !== currentPeriod.id ? <TouchableOpacity accessibilityRole="button" onPress={() => setPeriod(currentPeriod)}><Text style={styles.link}>Return to current period</Text></TouchableOpacity> : null}
+          <View style={styles.controls}>
+            {METRICS.map((name) => <TouchableOpacity key={name} accessibilityRole="button" accessibilityState={{ selected: metric === name }} onPress={() => setMetric(name)} style={[styles.metricButton, metric === name && styles.selectedButton]}><Text style={metric === name ? styles.buttonText : textStyle}>{LABELS[name]}</Text></TouchableOpacity>)}
+          </View>
         </View>
-      ) : error ? (
-        <View style={[styles.errorContainer, isDark && styles.errorContainerDark]}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={fetchMealHistoryAndUserData}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : mealHistory.length === 0 ? (
-        <View style={[styles.emptyContainer, isDark && styles.emptyContainerDark]}>
-          <Text style={[styles.emptyText, isDark && styles.textLight]}>
-            No meal data found
-          </Text>
-          <TouchableOpacity
-            style={styles.addMealButton}
-            onPress={() => router.push('/(app)/meal-logging')}
-          >
-            <Text style={styles.addMealButtonText}>Log Your First Meal</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <ScrollView 
-          style={[styles.scrollView, isDark && styles.scrollViewDark]} 
-          contentContainerStyle={styles.contentContainer}
-        >
-          {renderAvgNutritionCard()}
-          {renderMetricSelector()}
-          {renderTrendChart()}
-          {renderMacroDistributionChart()}
-          {renderMealCountByTypeChart()}
-          {renderMealLocationChart()}
-          {renderInsights()}
-          <View style={styles.bottomSpacer} />
-        </ScrollView>
-      )}
+        {loading ? <View style={cardStyle}><ActivityIndicator size="large" color="#2ecc71" /><Text style={textStyle}>Loading summary...</Text></View> : error ? (
+          <View style={cardStyle}><Text style={textStyle}>{error}</Text><TouchableOpacity accessibilityRole="button" onPress={() => void load()} style={styles.button}><Text style={styles.buttonText}>Retry</Text></TouchableOpacity></View>
+        ) : rollup ? renderSummary(rollup) : (
+          <View style={cardStyle}>
+            <Text style={[textStyle, styles.cardTitle]}>No summary available yet</Text>
+            <Text style={textStyle}>Summaries are generated from saved plans and meal logs by the backend. Keep the local analytics worker running while testing. Historical periods without records may have no summary.</Text>
+            <TouchableOpacity accessibilityRole="button" onPress={() => void load()} style={styles.button}><Text style={styles.buttonText}>Check again</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" onPress={() => router.push('/(app)/meal-logging')} style={styles.iconButton}><Text style={styles.link}>Log a meal</Text></TouchableOpacity>
+          </View>
+        )}
+      </ScrollView>
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  // Container / Layout
-  container: {
-    flex: 1,
-    backgroundColor: '#f9f9f9',
-  },
-  containerDark: {
-    backgroundColor: '#121212',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollViewDark: {
-    backgroundColor: '#121212',
-  },
-  contentContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 90, // extra space for bottom tab bar
-  },
-  // Header
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
-    paddingBottom: 16,
-    backgroundColor: 'white',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-    // ensure children can appear above other components
-    zIndex: 99,
-    overflow: 'visible',
-  },
-  headerDark: {
-    backgroundColor: '#1e1e1e',
-    shadowColor: '#000',
-  },
-  backButton: {
-    padding: 4,
-    marginRight: 8,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2ecc71',
-    flex: 1,
-  },
-  textLight: {
-    color: '#f2f2f2',
-  },
-  // Date Range Selector
-  dateRangeContainer: {
-    position: 'relative',
-    zIndex: 9999, // ensure dropdown above all
-  },
-  dateRangeSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-  },
-  dateRangeSelectorDark: {
-    backgroundColor: '#2a2a2a',
-  },
-  dateRangeText: {
-    fontSize: 14,
-    color: '#333',
-    marginRight: 4,
-  },
-  dateRangeDropdown: {
-    position: 'absolute',
-    top: 40,
-    right: 0,
-    backgroundColor: 'white',
-    borderRadius: 8,
-    paddingVertical: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 4,
-    width: 140,
-    zIndex: 9999,
-  },
-  dateRangeDropdownDark: {
-    backgroundColor: '#1e1e1e',
-    shadowColor: '#000',
-  },
-  dateRangeOption: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-  },
-  optionText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  optionTextDark: {
-    color: '#f2f2f2',
-  },
-  selectedOptionText: {
-    fontSize: 14,
-    color: '#2ecc71',
-    fontWeight: 'bold',
-  },
-  selectedOptionTextDark: {
-    color: '#2ecc71',
-  },
-  // Loading / Error / Empty states
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingContainerDark: {
-    backgroundColor: '#121212',
-  },
-  loadingText: {
-    marginTop: 16,
-    color: '#666',
-    fontSize: 16,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorContainerDark: {
-    backgroundColor: '#121212',
-  },
-  errorText: {
-    color: '#ff6b6b',
-    marginBottom: 16,
-    textAlign: 'center',
-    fontSize: 16,
-  },
-  retryButton: {
-    backgroundColor: '#2ecc71',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  emptyContainerDark: {
-    backgroundColor: '#121212',
-  },
-  emptyText: {
-    color: '#666',
-    marginBottom: 16,
-    fontSize: 16,
-  },
-  addMealButton: {
-    backgroundColor: '#2ecc71',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  addMealButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  // Average Nutrition
-  avgNutritionCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  cardDark: {
-    backgroundColor: '#1e1e1e',
-    shadowColor: '#000',
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-  },
-  cardTitleDark: {
-    color: '#f2f2f2',
-  },
-  avgNutritionGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  avgNutritionItem: {
-    alignItems: 'center',
-  },
-  avgNutritionValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2ecc71',
-    marginBottom: 4,
-  },
-  avgNutritionLabel: {
-    fontSize: 12,
-    color: '#666',
-  },
-  labelDark: {
-    color: '#aaa',
-  },
-  // Metric Selector
-  metricSelectorContainer: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    borderRadius: 12,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-    overflow: 'hidden',
-  },
-  metricSelectorContainerDark: {
-    backgroundColor: '#1e1e1e',
-  },
-  metricButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  activeMetricButton: {
-    backgroundColor: '#2ecc71',
-  },
-  metricText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  metricTextDark: {
-    color: '#aaa',
-  },
-  activeMetricText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  // Chart Containers
-  chartContainer: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  chartWrapper: {
-    alignItems: 'center',
-  },
-  chartTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-  },
-  chart: {
-    // Slight left shift to fit labels
-    borderRadius: 12,
-    marginLeft: -8,
-  },
-  emptyChartContainer: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 180,
-  },
-  emptyChartText: {
-    color: '#888',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  emptyChartTextDark: {
-    color: '#aaa',
-  },
-  // Meal Location
-  viewMapButton: {
-    flexDirection: 'row',
-    backgroundColor: '#2ecc71',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    alignItems: 'center',
-    marginTop: 16,
-    alignSelf: 'center',
-  },
-  viewMapButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
-  // Insights
-  insightsContainer: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  insightsTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-  },
-  insightItem: {
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#2ecc71',
-  },
-  insightItemDark: {
-    backgroundColor: '#252525',
-    borderLeftColor: '#2ecc71',
-  },
-  insightText: {
-    color: '#333',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  insightTextDark: {
-    color: '#e0e0e0',
-  },
-  emptyInsightsContainer: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 100,
-  },
-  emptyInsightsText: {
-    color: '#888',
-    fontSize: 14,
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-  emptyInsightsTextDark: {
-    color: '#aaa',
-  },
-  // Bottom spacer
-  bottomSpacer: {
-    height: 80, // extra space for the bottom tab bar
-  },
+  container: { flex: 1, backgroundColor: '#f9f9f9' },
+  containerDark: { backgroundColor: '#121212' },
+  header: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingTop: 48, paddingHorizontal: 16, paddingBottom: 12 },
+  title: { fontSize: 21, fontWeight: '700', marginLeft: 8 },
+  content: { padding: 16, paddingBottom: 100, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 16 },
+  cardDark: { backgroundColor: '#1e1e1e' },
+  cardTitle: { fontSize: 18, fontWeight: '700', marginBottom: 10 },
+  text: { color: '#333', fontSize: 14, lineHeight: 22, flexShrink: 1 },
+  textDark: { color: '#eee' },
+  row: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 5 },
+  value: { fontWeight: '600', textAlign: 'right' },
+  controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+  periodLabel: { flex: 1, textAlign: 'center' },
+  iconButton: { padding: 10, minHeight: 44, minWidth: 44, justifyContent: 'center' },
+  periodButton: { flexGrow: 1, minWidth: 132, alignItems: 'center', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#2ecc71' },
+  metricButton: { padding: 10, borderRadius: 8, minHeight: 44 },
+  selectedButton: { backgroundColor: '#238c50' },
+  button: { backgroundColor: '#238c50', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
+  buttonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  highlight: { fontSize: 30, fontWeight: '700', color: '#2ecc71', marginVertical: 8 },
+  link: { color: '#2ecc71', fontWeight: '600' },
+  chart: { borderRadius: 8 },
+  distribution: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  legend: { flex: 1, minWidth: 120 },
+  legendRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 4 },
+  swatch: { width: 10, height: 10, borderRadius: 5 },
 });
-
-export default DiningAnalyticsScreen;

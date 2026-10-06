@@ -11,13 +11,17 @@ import {
   Platform
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
+import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../../firebaseConfig';
-import { doc, getDoc, collection, query, where, onSnapshot, orderBy, updateDoc, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import { Search, Plus, ChartPie as PieChart, Clock, Settings, Map, UtensilsCrossed, ChartBar as BarChart3, CalendarClock, Check } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
+import { dateKey, dayBounds } from '../../functions/lib/reporting';
+import { logDailyPlanMeal } from '../../utils/mealPlanPersistence';
 
 export interface MealPlanSlot {
   id: string;
+  loggedMealId?: string;
   name: string;
   time: string;
   menuItem: {
@@ -29,7 +33,7 @@ export interface MealPlanSlot {
     restaurantName?: string;
     restaurantAddress?: string;
     location?: {
-      name: string;
+      name?: string;
       address?: string;
     }
   } | null;
@@ -45,7 +49,6 @@ const DashboardScreen: React.FC = () => {
   const [totalCalories, setTotalCalories] = useState<number>(0);
   const [caloriesLeft, setCaloriesLeft] = useState<number>(0);
   const [recentMeals, setRecentMeals] = useState<any[]>([]);
-  const [lastResetDate, setLastResetDate] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [totalProtein, setTotalProtein] = useState<number>(0);
   const [totalCarbs, setTotalCarbs] = useState<number>(0);
@@ -59,201 +62,54 @@ const DashboardScreen: React.FC = () => {
   const [todaysPlan, setTodaysPlan] = useState<MealPlanSlot[]>([]);
   const [planCreated, setPlanCreated] = useState<boolean>(false);
   
-  // Function to fetch user data and meal logs listener
-  const fetchUserDataAndMealLogs = async () => {
-    if (auth.currentUser) {
-      try {
-        const userRef = doc(db, 'users', auth.currentUser.uid);
-        const userDoc = await getDoc(userRef);
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          setUserData(data);
-          
-          // Check if we need to reset daily calories
-          const today = new Date().toDateString();
-          const storedResetDate = data.lastResetDate || '';
-          
-          if (storedResetDate !== today) {
-            setCaloriesLeft(data.dailyCalorieTarget || 2000);
-            setTotalCalories(0);
-            setLastResetDate(today);
-          } else {
-            setLastResetDate(storedResetDate);
-            const todaysCals = data.todayCalories || 0;
-            setTotalCalories(todaysCals);
-            setCaloriesLeft((data.dailyCalorieTarget || 2000) - todaysCals);
-            setIsCalorieExceeded(todaysCals > (data.dailyCalorieTarget || 2000));
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching user data:", error);
-        Alert.alert("Error", "Failed to load your profile data");
-      }
-    } else {
-      setUserData({
-        email: "user@example.com",
-        dailyCalorieTarget: 2000,
-        tdee: 2000
-      });
-      setCaloriesLeft(2000);
-    }
-    
-    const unsubscribe = setupMealLogsListener();
-    await fetchTodaysMealPlan();
-    
-    return unsubscribe;
-  };
-  
-  // Meal logs listener setup
-  const setupMealLogsListener = () => {
-    if (!auth.currentUser) return () => {};
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    
-    const mealsRef = collection(db, 'mealLogs');
-    const todayMealsQuery = query(
-      mealsRef,
-      where('userId', '==', auth.currentUser.uid),
-      where('date', '>=', today),
-      where('date', '<', tomorrow),
-      orderBy('date', 'desc')
-    );
-    
-    const unsubscribe = onSnapshot(todayMealsQuery, (snapshot) => {
-      let meals: any[] = [];
-      let totalCals = 0;
-      let proteinTotal = 0;
-      let carbsTotal = 0;
-      let fatTotal = 0;
-      
-      snapshot.forEach((docSnap) => {
-        const mealData = docSnap.data();
-        const mealDate = mealData.date?.toDate ? mealData.date.toDate() : new Date(mealData.date);
-        
-        const meal = {
-          id: docSnap.id,
-          foodName: mealData.foodName || '',
-          calories: mealData.calories || 0,
-          protein: mealData.protein || 0,
-          carbs: mealData.carbs || 0,
-          fat: mealData.fat || 0,
-          date: mealDate,
-          location: mealData.location,
-          mealType: mealData.mealType
-        };
-        
-        meals.push(meal);
-        totalCals += meal.calories;
-        proteinTotal += meal.protein;
-        carbsTotal += meal.carbs;
-        fatTotal += meal.fat;
-      });
-      
-      setRecentMeals(meals);
-      setTotalCalories(totalCals);
-      setTotalProtein(proteinTotal);
-      setTotalCarbs(carbsTotal);
-      setTotalFat(fatTotal);
-      
-      if (userData?.dailyCalorieTarget) {
-        const remaining = userData.dailyCalorieTarget - totalCals;
-        setCaloriesLeft(remaining);
-        setIsCalorieExceeded(remaining < 0);
-        const proteinTarget = userData.dailyCalorieTarget * 0.25 / 4;
-        const carbsTarget = userData.dailyCalorieTarget * 0.5 / 4;
-        const fatTarget = userData.dailyCalorieTarget * 0.25 / 9;
-        setIsProteinExceeded(proteinTotal > proteinTarget);
-        setIsCarbsExceeded(carbsTotal > carbsTarget);
-        setIsFatExceeded(fatTotal > fatTarget);
-      }
-      
-      if (auth.currentUser) {
-        const userRef = doc(db, 'users', auth.currentUser.uid);
-        const todayString = new Date().toDateString();
-        getDoc(userRef).then((docSnap) => {
-          if (docSnap.exists()) {
-            if (docSnap.data().todayCalories !== totalCals || docSnap.data().lastResetDate !== todayString) {
-              updateDoc(userRef, {
-                todayCalories: totalCals,
-                lastResetDate: todayString
-              });
-            }
-          }
-        }).catch((error) => {
-          console.error("Error updating user calories:", error);
-        });
-      }
-    }, (error) => {
-      console.error("Error listening to meal logs:", error);
-      Alert.alert("Error", "Failed to sync your meal data");
-    });
-    
-    return unsubscribe;
-  };
-  
-  // Updated: Do not filter out completed meals—keep all slots.
-  const fetchTodaysMealPlan = async () => {
-    if (!auth.currentUser) return;
-    
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const planRef = doc(db, `users/${auth.currentUser.uid}/plans`, today);
-      const planDoc = await getDoc(planRef);
-      
-      if (planDoc.exists()) {
-        setPlanCreated(true);
-        const planData = planDoc.data();
-        setTodaysPlan(planData.slots);  // << Keep ALL slots, including completed (menuItem is null)
-      } else {
-        setPlanCreated(false);
-        setTodaysPlan([]);
-      }
-    } catch (error) {
-      console.error("Error fetching today's meal plan:", error);
-    }
-  };
+  const [uid, setUid] = useState<string | null>(auth.currentUser?.uid || null);
+  useEffect(() => onAuthStateChanged(auth, (user) => setUid(user?.uid || null)), []);
+  useEffect(() => {
+    const target = userData?.dailyCalorieTarget || 2000;
+    setCaloriesLeft(target - totalCalories); setIsCalorieExceeded(totalCalories > target);
+    setIsProteinExceeded(totalProtein > target * 0.25 / 4);
+    setIsCarbsExceeded(totalCarbs > target * 0.5 / 4);
+    setIsFatExceeded(totalFat > target * 0.25 / 9);
+  }, [userData?.dailyCalorieTarget, totalCalories, totalProtein, totalCarbs, totalFat]);
+  useFocusEffect(React.useCallback(() => {
+    setLoading(true); setRecentMeals([]); setTotalCalories(0);
+    setTotalProtein(0); setTotalCarbs(0); setTotalFat(0);
+    setTodaysPlan([]); setPlanCreated(false); setUserData(null);
+    if (!uid) { setLoading(false); return; }
+    const stops: (() => void)[] = [];
+    const subscribe = () => {
+      stops.splice(0).forEach((stop) => stop());
+      const key = dateKey()!; const { start, end } = dayBounds(key);
+      stops.push(onSnapshot(doc(db, 'users', uid), (snapshot) => setUserData(snapshot.exists() ? snapshot.data() : null), (error) => console.error('Profile sync failed:', error.message)));
+      stops.push(onSnapshot(query(collection(db, 'mealLogs'), where('userId', '==', uid),
+        where('date', '>=', start), where('date', '<', end), orderBy('date', 'desc')), (snapshot) => {
+        const meals = snapshot.docs.map((entry) => ({ ...entry.data(), id: entry.id,
+          date: entry.data().date?.toDate?.() || new Date(entry.data().date) }));
+        const sum = (metric: string) => meals.reduce((total, meal) => {
+          const value = (meal as Record<string, any>)[metric];
+          return total + (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+        }, 0);
+        setRecentMeals(meals); setTotalCalories(sum('calories')); setTotalProtein(sum('protein'));
+        setTotalCarbs(sum('carbs')); setTotalFat(sum('fat')); setLoading(false);
+      }, () => { setLoading(false); Alert.alert('Meal sync failed', 'Please reconnect and reopen the dashboard.'); }));
+      stops.push(onSnapshot(doc(db, 'users', uid, 'plans', key), (snapshot) => {
+        setPlanCreated(snapshot.exists()); setTodaysPlan(snapshot.data()?.slots || []);
+      }));
+    };
+    let reportingDate = dateKey(); subscribe();
+    const timer = setInterval(() => {
+      if (dateKey() !== reportingDate) { reportingDate = dateKey(); subscribe(); }
+    }, 30000);
+    return () => { clearInterval(timer); stops.forEach((stop) => stop()); };
+  }, [uid]));
 
   // Log a planned meal.
   const logPlannedMeal = async (slot: MealPlanSlot) => {
     if (!auth.currentUser || !slot.menuItem) return;
     
     try {
-      await addDoc(collection(db, 'mealLogs'), {
-        userId: auth.currentUser.uid,
-        foodName: slot.menuItem.foodName,
-        calories: slot.menuItem.calories,
-        protein: slot.menuItem.protein || 0,
-        carbs: slot.menuItem.carbs || 0,
-        fat: slot.menuItem.fat || 0,
-        date: new Date(),
-        createdAt: serverTimestamp(),
-        mealType: slot.name,
-        location: slot.locationType === 'home'
-          ? { name: 'Home', type: 'home' }
-          : { 
-              name: slot.menuItem.restaurantName || 'Restaurant', 
-              type: 'restaurant',
-              address: slot.menuItem.restaurantAddress || 'N/A'
-            }
-      });
-      
-      const today = new Date().toISOString().split('T')[0];
-      const planRef = doc(db, `users/${auth.currentUser.uid}/plans`, today);
-      const planDoc = await getDoc(planRef);
-      
-      if (planDoc.exists()) {
-        const planData = planDoc.data();
-        const updatedSlots = planData.slots.map((s: MealPlanSlot) => 
-          s.id === slot.id ? { ...s, menuItem: null } : s
-        );
-        
-        await updateDoc(planRef, { slots: updatedSlots });
-        setTodaysPlan(updatedSlots);
-      }
-      
+      const updatedSlots = await logDailyPlanMeal(auth.currentUser.uid, slot.id);
+      setTodaysPlan(updatedSlots);
       Alert.alert('Success', 'Meal logged successfully!');
     } catch (error) {
       console.error('Error logging planned meal:', error);
@@ -261,46 +117,6 @@ const DashboardScreen: React.FC = () => {
     }
   };
   
-  useFocusEffect(
-    React.useCallback(() => {
-      setLoading(true);
-      const loadData = async () => {
-        const unsubscribe = await fetchUserDataAndMealLogs();
-        setLoading(false);
-        return unsubscribe;
-      };
-      const cleanup = loadData();
-      return () => {
-        cleanup.then(cleanupFn => {
-          if (typeof cleanupFn === 'function') {
-            cleanupFn();
-          }
-        }).catch(err => {
-          console.error("Error during cleanup:", err);
-        });
-      };
-    }, [])
-  );
-  
-  useEffect(() => {
-    setLoading(true);
-    const loadData = async () => {
-      const unsubscribe = await fetchUserDataAndMealLogs();
-      setLoading(false);
-      return unsubscribe;
-    };
-    const cleanupPromise = loadData();
-    return () => {
-      cleanupPromise.then(cleanup => {
-        if (typeof cleanup === 'function') {
-          cleanup();
-        }
-      }).catch(err => {
-        console.error("Error during cleanup:", err);
-      });
-    };
-  }, []);
-
   const welcomeMessage = `Welcome${userData?.name ? ', ' + userData.name : userData?.email ? ', ' + userData.email.split('@')[0] : ''}!`;
 
   const navigateToRestaurants = () => {
@@ -489,7 +305,7 @@ const DashboardScreen: React.FC = () => {
     }
     
     // If every slot is completed, show a dedicated, enhanced UI.
-    const allCompleted = todaysPlan.every(slot => !slot.menuItem);
+    const allCompleted = todaysPlan.every(slot => Boolean(slot.loggedMealId) || !slot.menuItem);
     if (allCompleted) {
       return (
         <View style={[styles.completedPlanContainer, isDark && styles.completedPlanContainerDark]}>
@@ -512,7 +328,7 @@ const DashboardScreen: React.FC = () => {
                 {formatTimeForDisplay(slot.time)}
               </Text>
             </View>
-            {slot.menuItem ? (
+            {slot.menuItem && !slot.loggedMealId ? (
               <>
                 <View style={styles.planItemDetails}>
                   <View style={styles.planItemFood}>

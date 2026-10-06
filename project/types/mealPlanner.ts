@@ -8,10 +8,13 @@ export interface MenuItem {
   protein: number;
   carbs: number;
   fat: number;
+  restaurantName?: string;
+  restaurantAddress?: string;
   createdBy?: string;
   createdAt?: Timestamp;
   location?: {
     name?: string;
+    address?: string;
     type?: string;
     placeId?: string;
   };
@@ -19,6 +22,8 @@ export interface MenuItem {
 
 export interface MealSlot {
   id: string;
+  loggedMealId?: string;
+  reason?: string;
   name: string;
   time: string;
   locationType: 'home' | 'restaurant';

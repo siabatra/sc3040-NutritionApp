@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+
+    match /users/{uid} {
+      allow read, write: if owner(uid);
+      match /plans/{planId} { allow read, write: if owner(uid); }
+      match /analytics/{periodId} {
+        allow read: if owner(uid);
+        allow write: if false;
+      }
+      match /analyticsPending/{periodId} { allow read, write: if false; }
+      match /analyticsState/{documentId} { allow read, write: if false; }
+      // Retain existing user subcollections without granting analytics write access.
+      match /{collectionId}/{document=**} {
+        allow read, write: if owner(uid)
+          && !(collectionId in ['analytics', 'analyticsPending', 'analyticsState']);
+      }
+    }
+    match /mealLogs/{mealId} {
+      allow read, delete: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn() && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+    }
+    // Existing prototype shared collections; analytics does not alter menu authoring.
+    match /restaurants/{document=**} { allow read, write: if signedIn(); }
+    match /timeframes/{document=**} { allow read: if signedIn(); }
+  }
+}

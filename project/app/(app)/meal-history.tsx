@@ -15,9 +15,11 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
-import { collection, query, where, orderBy, getDocs, deleteDoc, doc, updateDoc, Timestamp } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, doc, updateDoc, Timestamp } from 'firebase/firestore';
 import { ArrowLeft, Trash2, CreditCard as Edit, X, Calendar, Filter, ChartBar as BarChart3, Map as MapIcon, List, ChevronDown } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
+import { deleteMealLog } from '../../utils/mealPlanPersistence';
+import { normaliseMealType } from '../../functions/lib/reporting';
 import { MapView, Marker, Callout, PROVIDER_GOOGLE } from '../../utils/nativeMaps';
 
 interface MealLog {
@@ -134,7 +136,7 @@ const MealHistoryScreen: React.FC = () => {
           carbs: data.carbs || 0,
           fat: data.fat || 0,
           date: mealDate,
-          mealType: data.mealType || null,
+          mealType: normaliseMealType(data.mealType),
           location: data.location || { name: 'Custom meal', type: 'custom' }
         };
         
@@ -204,7 +206,8 @@ const MealHistoryScreen: React.FC = () => {
           onPress: async () => {
             try {
               setLoading(true);
-              await deleteDoc(doc(db, 'mealLogs', mealId));
+              if (!auth.currentUser) throw new Error('Please sign in again.');
+              await deleteMealLog(auth.currentUser.uid, mealId);
               // Update state after deletion
               setMealHistory(mealHistory.filter(meal => meal.id !== mealId));
               Alert.alert('Success', 'Meal deleted successfully');

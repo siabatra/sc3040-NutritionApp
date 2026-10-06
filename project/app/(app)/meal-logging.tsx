@@ -78,6 +78,11 @@ const MealLoggingScreen: React.FC = () => {
     }
   }
   
+  const editedNutrition = useRef(new Set<string>());
+  const nutritionRequest = useRef(0);
+  const currentFoodName = useRef(foodName);
+  currentFoodName.current = foodName;
+
   // Fetch nutrition data when food name changes (if not from a restaurant)
   useEffect(() => {
     if (!restaurantId && foodName.trim().length > 2) {
@@ -92,22 +97,23 @@ const MealLoggingScreen: React.FC = () => {
   const fetchNutritionData = async (query: string) => {
     if (!query.trim()) return;
     
+    const request = ++nutritionRequest.current;
     setFetchingNutrition(true);
     
     try {
       const nutritionData = await fetchNutritionForFood(query);
 
-      if (nutritionData) {
-        setCalories(Math.round(nutritionData.nf_calories || 0).toString());
-        setFat(Math.round(nutritionData.nf_total_fat || 0).toString());
-        setCarbs(Math.round(nutritionData.nf_total_carbohydrate || 0).toString());
-        setProtein(Math.round(nutritionData.nf_protein || 0).toString());
+      if (nutritionData && request === nutritionRequest.current && query === currentFoodName.current) {
+        if (!editedNutrition.current.has('calories')) setCalories(Math.round(nutritionData.nf_calories || 0).toString());
+        if (!editedNutrition.current.has('fat')) setFat(Math.round(nutritionData.nf_total_fat || 0).toString());
+        if (!editedNutrition.current.has('carbs')) setCarbs(Math.round(nutritionData.nf_total_carbohydrate || 0).toString());
+        if (!editedNutrition.current.has('protein')) setProtein(Math.round(nutritionData.nf_protein || 0).toString());
       }
     } catch (error) {
       console.error('Error fetching nutrition data:', error);
       Alert.alert('Error', 'Failed to fetch nutrition data');
     } finally {
-      setFetchingNutrition(false);
+      if (request === nutritionRequest.current) setFetchingNutrition(false);
     }
   };
   
@@ -387,7 +393,7 @@ const MealLoggingScreen: React.FC = () => {
               <TextInput
                 style={[styles.input, isDark && styles.inputDark]}
                 value={calories}
-                onChangeText={setCalories}
+                onChangeText={(value) => { editedNutrition.current.add('calories'); setCalories(value); }}
                 keyboardType="numeric"
                 placeholder="0"
                 placeholderTextColor={isDark ? "#777" : "#aaa"}
@@ -399,7 +405,7 @@ const MealLoggingScreen: React.FC = () => {
               <TextInput
                 style={[styles.input, isDark && styles.inputDark]}
                 value={protein}
-                onChangeText={setProtein}
+                onChangeText={(value) => { editedNutrition.current.add('protein'); setProtein(value); }}
                 keyboardType="numeric"
                 placeholder="0"
                 placeholderTextColor={isDark ? "#777" : "#aaa"}
@@ -413,7 +419,7 @@ const MealLoggingScreen: React.FC = () => {
               <TextInput
                 style={[styles.input, isDark && styles.inputDark]}
                 value={carbs}
-                onChangeText={setCarbs}
+                onChangeText={(value) => { editedNutrition.current.add('carbs'); setCarbs(value); }}
                 keyboardType="numeric"
                 placeholder="0"
                 placeholderTextColor={isDark ? "#777" : "#aaa"}
@@ -425,7 +431,7 @@ const MealLoggingScreen: React.FC = () => {
               <TextInput
                 style={[styles.input, isDark && styles.inputDark]}
                 value={fat}
-                onChangeText={setFat}
+                onChangeText={(value) => { editedNutrition.current.add('fat'); setFat(value); }}
                 keyboardType="numeric"
                 placeholder="0"
                 placeholderTextColor={isDark ? "#777" : "#aaa"}

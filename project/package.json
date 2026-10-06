@@ -4,9 +4,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "expo start",
+    "dev": "node scripts/dev.js",
     "build:web": "expo export --platform web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "analytics:backfill": "npm --prefix functions run backfill",
+    "analytics:worker": "npm --prefix functions run worker"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
