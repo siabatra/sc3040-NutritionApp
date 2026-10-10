@@ -14,7 +14,7 @@ The mobile app is in the `project` folder. The project also includes a small Exp
 - Nearby restaurant search using Google Maps/Places
 - Restaurant details, favorites, directions, and user-added menu items
 - Nutrition lookup for food items using USDA FoodData Central
-- AI meal plan generation
+- AI meal plan generation, menu extraction and meal-photo recognition with the Claude API (via the server)
 - Light/dark theme support
 
 ## Tech Stack
@@ -29,6 +29,7 @@ The mobile app is in the `project` folder. The project also includes a small Exp
 - Nodemailer
 - Google Maps / Places / Directions APIs
 - USDA FoodData Central API
+- Claude API (Anthropic SDK)
 
 ## Project Structure
 
@@ -172,13 +173,15 @@ Set these variables in `project/.env`:
 - `EXPO_PUBLIC_FIREBASE_*`: Firebase web app configuration.
 - `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`: Google Places and Directions API key.
 - `EXPO_PUBLIC_USDA_API_KEY`: USDA FoodData Central API key used by the nutrition utility.
-- `EXPO_PUBLIC_DEEPSEEK_API_KEY`: current client-side meal planning integration.
 - `EXPO_PUBLIC_SERVER_URL`: email server address.
 - `EMAIL_USER` and `EMAIL_PASS`: server-only email credentials; never add an `EXPO_PUBLIC_` prefix.
+- `ANTHROPIC_API_KEY`: server-only Claude API key used by `server/claude.js`; never add an `EXPO_PUBLIC_` prefix.
+
+The server exposes `POST /ai/meal-plan`, `POST /ai/extract-menu` and `POST /ai/analyze-meal-photo`. Each requires the signed-in user's Firebase ID token; the app calls them through `utils/claudeApi.ts`. The server must be running for Plan My Day to work.
 
 The standalone `meal rec test/meal-recommendation.mjs` uses its own `meal rec test/.env` (copy its `.env.example`). It has a different Firebase project configuration. Run `npm install` in that directory and then `node meal-recommendation.mjs`; the script loads the adjacent `.env` regardless of your working directory.
 
-**Client-side limitation:** Expo includes all referenced `EXPO_PUBLIC_*` values in the built app. Ignoring `.env` protects source control, but does not hide those values from app users. The DeepSeek integration needs an authenticated backend before distributing the app with a private provider key. Firebase client configuration is designed for client use; protect the database with appropriate Security Rules and restrict Google API keys. See [Expo environment variable security](https://docs.expo.dev/guides/environment-variables/#security-considerations).
+**Client-side limitation:** Expo includes all referenced `EXPO_PUBLIC_*` values in the built app. Ignoring `.env` protects source control, but does not hide those values from app users. Firebase client configuration is designed for client use; protect the database with appropriate Security Rules and restrict Google API keys. See [Expo environment variable security](https://docs.expo.dev/guides/environment-variables/#security-considerations).
 
 ## Firestore Indexes
 

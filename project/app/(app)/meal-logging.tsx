@@ -6,9 +6,27 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { ArrowLeft, Save, Calendar, Check } from 'lucide-react-native';
+import { ArrowLeft, Save, Calendar, Check, Camera, X } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
 import { fetchNutritionForFood } from '../../utils/nutritionApi';
+import { analyzeMealPhoto, AiServiceError } from '../../utils/claudeApi';
+import PhotoCaptureModal from '../../components/PhotoCaptureModal';
+
+// A food detected in a meal photo, with string fields so the user can edit them.
+interface PhotoFoodItem {
+  name: string;
+  servingDescription: string;
+  estimatedGrams: number;
+  calories: string;
+  protein: string;
+  carbs: string;
+  fat: string;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+const MACRO_KEYS = ['calories', 'protein', 'carbs', 'fat'] as const;
+
+const isValidAmount = (value: string) => value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= 0;
 
 // For web platform compatibility, provide a DateTimePicker alternative
 const DateTimePickerWeb = ({ value, onChange, mode }: any) => {
@@ -55,6 +73,11 @@ const MealLoggingScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [fetchingNutrition, setFetchingNutrition] = useState(false);
   const [mealType, setMealType] = useState(params.mealType as string || '');
+
+  // Photo logging (SRS 7.3.2)
+  const [showCamera, setShowCamera] = useState(false);
+  const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
+  const [photoItems, setPhotoItems] = useState<PhotoFoodItem[] | null>(null);
   
   // State for success modal
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -80,6 +103,8 @@ const MealLoggingScreen: React.FC = () => {
   
   // Fetch nutrition data when food name changes (if not from a restaurant)
   useEffect(() => {
+    // Photo results already carry nutrition values; don't overwrite them with a lookup.
+    if (photoItems) return;
     if (!restaurantId && foodName.trim().length > 2) {
       const debounceTimer = setTimeout(() => {
         fetchNutritionData(foodName);
@@ -87,7 +112,7 @@ const MealLoggingScreen: React.FC = () => {
       
       return () => clearTimeout(debounceTimer);
     }
-  }, [foodName, restaurantId]);
+  }, [foodName, restaurantId, photoItems]);
   
   const fetchNutritionData = async (query: string) => {
     if (!query.trim()) return;
@@ -111,6 +136,73 @@ const MealLoggingScreen: React.FC = () => {
     }
   };
   
+  // Copy the (possibly corrected) photo items into the meal form.
+  const applyPhotoItems = (items: PhotoFoodItem[]) => {
+    setFoodName(items.map((item) => item.name).filter(Boolean).join(', '));
+    for (const key of MACRO_KEYS) {
+      const total = items.reduce((sum, item) => sum + (Number(item[key]) || 0), 0);
+      const setter = { calories: setCalories, protein: setProtein, carbs: setCarbs, fat: setFat }[key];
+      setter(Math.round(total).toString());
+    }
+  };
+
+  const updatePhotoItem = (index: number, field: keyof PhotoFoodItem, value: string) => {
+    if (!photoItems) return;
+    const updated = photoItems.map((item, i) => (i === index ? { ...item, [field]: value } : item));
+    setPhotoItems(updated);
+    applyPhotoItems(updated);
+  };
+
+  const removePhotoItem = (index: number) => {
+    if (!photoItems) return;
+    const updated = photoItems.filter((_, i) => i !== index);
+    if (updated.length === 0) {
+      clearPhotoResults();
+      return;
+    }
+    setPhotoItems(updated);
+    applyPhotoItems(updated);
+  };
+
+  const clearPhotoResults = () => {
+    setPhotoItems(null);
+    setFoodName('');
+    setCalories('0');
+    setProtein('0');
+    setCarbs('0');
+    setFat('0');
+  };
+
+  const handlePhotoConfirmed = async (imageBase64: string) => {
+    setShowCamera(false);
+    setAnalyzingPhoto(true);
+    try {
+      const result = await analyzeMealPhoto(imageBase64, 'image/jpeg');
+      const items: PhotoFoodItem[] = result.foods.map((food) => ({
+        name: food.name,
+        servingDescription: food.servingDescription,
+        estimatedGrams: food.estimatedGrams,
+        calories: Math.round(food.calories).toString(),
+        protein: Math.round(food.protein).toString(),
+        carbs: Math.round(food.carbs).toString(),
+        fat: Math.round(food.fat).toString(),
+        confidence: food.confidence,
+      }));
+      setPhotoItems(items);
+      applyPhotoItems(items);
+    } catch (error) {
+      console.error('Meal photo analysis failed:', error);
+      const message = error instanceof AiServiceError ? error.message : 'Could not analyse the photo.';
+      const offerManual = !(error instanceof AiServiceError) || error.shouldOfferManualEntry;
+      Alert.alert(
+        'Photo not recognised',
+        offerManual ? `${message}\n\nYou can enter the meal manually below.` : message
+      );
+    } finally {
+      setAnalyzingPhoto(false);
+    }
+  };
+
   const handleDateChange = (event: any, selectedDate?: Date) => {
     const currentDate = selectedDate || mealDate;
     setShowDatePicker(Platform.OS === 'ios');
@@ -135,6 +227,16 @@ const MealLoggingScreen: React.FC = () => {
     
     if (isNaN(Number(calories)) || Number(calories) <= 0) {
       Alert.alert('Error', 'Please enter valid calories');
+      return false;
+    }
+
+    if (![protein, carbs, fat].every(isValidAmount)) {
+      Alert.alert('Error', 'Please enter valid protein, carbs and fat values');
+      return false;
+    }
+
+    if (photoItems && photoItems.some((item) => !item.name.trim() || !MACRO_KEYS.every((key) => isValidAmount(item[key])))) {
+      Alert.alert('Error', 'Please fix the highlighted values in the detected foods');
       return false;
     }
     
@@ -188,7 +290,22 @@ const MealLoggingScreen: React.FC = () => {
         date: mealDate,
         createdAt: serverTimestamp(),
         location: locationData,
-        mealType: mealType || null
+        mealType: mealType || null,
+        source: photoItems ? 'photo' : 'manual',
+        // Detected foods as reviewed and corrected by the user (AI estimates, not verified).
+        ...(photoItems && {
+          items: photoItems.map((item) => ({
+            name: item.name.trim(),
+            servingDescription: item.servingDescription,
+            estimatedGrams: item.estimatedGrams,
+            calories: Number(item.calories),
+            protein: Number(item.protein),
+            carbs: Number(item.carbs),
+            fat: Number(item.fat),
+            confidence: item.confidence,
+          })),
+          nutritionVerified: false,
+        }),
       });
 
       // Show success modal with improved animations
@@ -250,6 +367,75 @@ const MealLoggingScreen: React.FC = () => {
       />
     );
   };
+
+  const renderPhotoSection = () => (
+    <View style={[styles.formSection, isDark && styles.formSectionDark]}>
+      <Text style={[styles.sectionTitle, isDark && styles.textLight]}>Log by Photo</Text>
+      {analyzingPhoto ? (
+        <View style={styles.analyzingRow}>
+          <ActivityIndicator size="small" color="#2ecc71" />
+          <Text style={[styles.analyzingText, isDark && styles.textLight]}>Identifying your meal...</Text>
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.photoButton} onPress={() => setShowCamera(true)}>
+          <Camera size={20} color="#fff" />
+          <Text style={styles.photoButtonText}>{photoItems ? 'Retake Meal Photo' : 'Take a Meal Photo'}</Text>
+        </TouchableOpacity>
+      )}
+
+      {photoItems && (
+        <View style={styles.photoResults}>
+          <Text style={[styles.photoNote, isDark && styles.photoNoteDark]}>
+            AI estimates – check and correct the values before logging.
+          </Text>
+          {photoItems.map((item, index) => (
+            <View key={index} style={[styles.photoItem, isDark && styles.photoItemDark]}>
+              <View style={styles.photoItemHeader}>
+                <TextInput
+                  style={[styles.input, styles.photoItemName, isDark && styles.inputDark, !item.name.trim() && styles.inputInvalid]}
+                  value={item.name}
+                  onChangeText={(value) => updatePhotoItem(index, 'name', value)}
+                  placeholder="Food name"
+                  placeholderTextColor={isDark ? '#777' : '#aaa'}
+                />
+                <TouchableOpacity onPress={() => removePhotoItem(index)} style={styles.photoItemRemove}>
+                  <X size={18} color={isDark ? '#aaa' : '#888'} />
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={[styles.input, styles.photoServing, isDark && styles.inputDark]}
+                value={item.servingDescription}
+                onChangeText={(value) => updatePhotoItem(index, 'servingDescription', value)}
+                placeholder="Serving size"
+                placeholderTextColor={isDark ? '#777' : '#aaa'}
+              />
+              <View style={styles.macroRow}>
+                {MACRO_KEYS.map((key) => (
+                  <View key={key} style={styles.photoMacro}>
+                    <Text style={[styles.photoMacroLabel, isDark && styles.labelDark]}>
+                      {key === 'calories' ? 'kcal' : `${key[0].toUpperCase()}${key.slice(1)} (g)`}
+                    </Text>
+                    <TextInput
+                      style={[styles.input, styles.photoMacroInput, isDark && styles.inputDark, !isValidAmount(item[key]) && styles.inputInvalid]}
+                      value={item[key]}
+                      onChangeText={(value) => updatePhotoItem(index, key, value)}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                ))}
+              </View>
+              {item.confidence === 'low' && (
+                <Text style={styles.lowConfidence}>Low confidence – please double-check this item.</Text>
+              )}
+            </View>
+          ))}
+          <TouchableOpacity onPress={clearPhotoResults}>
+            <Text style={styles.clearPhotoText}>Clear photo results and enter manually</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
 
   const renderMealTypeSelector = () => (
     <View style={styles.inputGroup}>
@@ -358,6 +544,8 @@ const MealLoggingScreen: React.FC = () => {
       </View>
       
       <ScrollView style={styles.content} contentContainerStyle={[styles.contentContainer, isDark && styles.contentContainerDark]}>
+        {renderPhotoSection()}
+
         <View style={[styles.formSection, isDark && styles.formSectionDark]}>
           <Text style={[styles.sectionTitle, isDark && styles.textLight]}>Food Details</Text>
           
@@ -521,6 +709,14 @@ const MealLoggingScreen: React.FC = () => {
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      <PhotoCaptureModal
+        visible={showCamera}
+        title="Meal Photo"
+        hint="Fit the whole plate or bowl in the frame."
+        onCancel={() => setShowCamera(false)}
+        onConfirm={handlePhotoConfirmed}
+      />
 
       {/* Success Modal */}
       <Modal
@@ -817,6 +1013,98 @@ const styles = StyleSheet.create({
   mealTypeButtonTextSelected: {
     color: 'white',
     fontWeight: 'bold',
+  },
+  // Photo logging styles
+  photoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2ecc71',
+    borderRadius: 8,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  photoButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  analyzingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 8,
+  },
+  analyzingText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  photoResults: {
+    marginTop: 16,
+  },
+  photoNote: {
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 12,
+  },
+  photoNoteDark: {
+    color: '#aaa',
+  },
+  photoItem: {
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  photoItemDark: {
+    borderColor: '#333',
+  },
+  photoItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  photoItemName: {
+    flex: 1,
+    fontWeight: 'bold',
+  },
+  photoItemRemove: {
+    padding: 8,
+  },
+  photoServing: {
+    marginTop: 8,
+    marginBottom: 8,
+    fontSize: 14,
+    padding: 8,
+  },
+  photoMacro: {
+    flex: 1,
+    marginHorizontal: 2,
+  },
+  photoMacroLabel: {
+    fontSize: 12,
+    color: '#555',
+    marginBottom: 4,
+  },
+  photoMacroInput: {
+    padding: 8,
+    fontSize: 14,
+  },
+  inputInvalid: {
+    borderColor: '#ff6b6b',
+    borderWidth: 2,
+  },
+  lowConfidence: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#e67e22',
+  },
+  clearPhotoText: {
+    color: '#2ecc71',
+    textAlign: 'center',
+    fontWeight: '500',
+    paddingVertical: 4,
   },
   // Modal Styles
   modalOverlay: {

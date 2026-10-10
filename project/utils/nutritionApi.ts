@@ -49,3 +49,55 @@ export const fetchNutritionForFood = async (query: string): Promise<NutritionDat
     nf_protein: getNutrientValue(food, ['Protein']),
   };
 };
+
+export interface DishNutritionEstimate {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  matchedComponents: string[];
+  unmatchedComponents: string[];
+}
+
+// Typical hawker / food-court plate when the portion is unknown.
+const DEFAULT_PORTION_GRAMS = 350;
+
+/**
+ * Estimate a dish's nutrition from its constituent foods. USDA values are per 100 g,
+ * so the portion is split evenly across components and each is scaled to its share.
+ * Returns null when no component matches a USDA record.
+ */
+export const estimateDishNutrition = async (
+  components: string[],
+  portionGrams: number | null
+): Promise<DishNutritionEstimate | null> => {
+  if (components.length === 0) return null;
+  const gramsPerComponent = (portionGrams || DEFAULT_PORTION_GRAMS) / components.length;
+
+  const results = await Promise.all(
+    components.map((component) => fetchNutritionForFood(component).catch(() => null))
+  );
+
+  const estimate: DishNutritionEstimate = {
+    calories: 0,
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+    matchedComponents: [],
+    unmatchedComponents: [],
+  };
+  results.forEach((result, index) => {
+    if (!result) {
+      estimate.unmatchedComponents.push(components[index]);
+      return;
+    }
+    const scale = gramsPerComponent / 100;
+    estimate.calories += result.nf_calories * scale;
+    estimate.protein += result.nf_protein * scale;
+    estimate.carbs += result.nf_total_carbohydrate * scale;
+    estimate.fat += result.nf_total_fat * scale;
+    estimate.matchedComponents.push(components[index]);
+  });
+
+  return estimate.matchedComponents.length > 0 ? estimate : null;
+};

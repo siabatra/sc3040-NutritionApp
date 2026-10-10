@@ -17,9 +17,40 @@ serviceAccountKey*.json
 *.mobileprovision
 .npmrc
 
-# Dependencies, generated builds and local state
+# Dependencies
 node_modules/
+.pnp
+.pnp.js
+
+# Expo / React Native builds and local state
 .expo/
 dist/
 web-build/
+expo-env.d.ts
+.metro-health-check*
+ios/
+android/
+*.orig.*
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs and debug output
 *.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.eslintcache
+
+# Test and coverage output
+coverage/
+
+# OS and editor junk
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json

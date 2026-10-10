@@ -3,11 +3,13 @@ import React, { useEffect, useState, useContext } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert, Platform, Image, ScrollView } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { ArrowLeft, Heart, Plus, MapPin, ArrowUpRight, Search, X } from 'lucide-react-native';
+import { doc, getDoc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { ArrowLeft, Heart, Plus, MapPin, ArrowUpRight, Search, X, Camera, Check } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
 import { MapView, Marker, PROVIDER_GOOGLE } from '../../utils/nativeMaps';
-import { fetchNutritionForFood, type NutritionData } from '../../utils/nutritionApi';
+import { fetchNutritionForFood, estimateDishNutrition, type NutritionData } from '../../utils/nutritionApi';
+import { extractMenuFromImage, AiServiceError } from '../../utils/claudeApi';
+import PhotoCaptureModal from '../../components/PhotoCaptureModal';
 
 interface MenuItem {
   id: string;
@@ -19,6 +21,27 @@ interface MenuItem {
   createdBy?: string;
   createdAt?: any;
 }
+
+// A dish read from a menu photo, awaiting the user's review before it is saved.
+interface CapturedMenuItem {
+  include: boolean;
+  foodName: string;
+  calories: string;
+  protein: string;
+  carbs: string;
+  fat: string;
+  price: number | null;
+  components: string[];
+  unmatchedComponents: string[];
+  nutritionFound: boolean;
+}
+
+const MACRO_KEYS = ['calories', 'protein', 'carbs', 'fat'] as const;
+
+const isValidAmount = (value: string) => value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= 0;
+
+const isSavable = (item: CapturedMenuItem) =>
+  item.foodName.trim() !== '' && MACRO_KEYS.every((key) => isValidAmount(item[key])) && Number(item.calories) > 0;
 
 const RestaurantDetailsScreen: React.FC = () => {
   const params = useLocalSearchParams();
@@ -36,6 +59,12 @@ const RestaurantDetailsScreen: React.FC = () => {
   const [fetchingNutrition, setFetchingNutrition] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [addingItem, setAddingItem] = useState<boolean>(false);
+
+  // Menu capture (SRS 7.2.4)
+  const [showMenuCamera, setShowMenuCamera] = useState<boolean>(false);
+  const [menuCaptureStatus, setMenuCaptureStatus] = useState<string | null>(null);
+  const [capturedItems, setCapturedItems] = useState<CapturedMenuItem[] | null>(null);
+  const [savingCapturedItems, setSavingCapturedItems] = useState<boolean>(false);
   
   // Fetch restaurant details and check if it's a favorite
   useEffect(() => {
@@ -236,6 +265,194 @@ const RestaurantDetailsScreen: React.FC = () => {
     }
   };
   
+  const handleMenuPhotoConfirmed = async (imageBase64: string) => {
+    setShowMenuCamera(false);
+    setMenuCaptureStatus('Reading the menu...');
+    try {
+      const { items } = await extractMenuFromImage(imageBase64, 'image/jpeg');
+
+      setMenuCaptureStatus(`Looking up nutrition for ${items.length} dishes...`);
+      const reviewed: CapturedMenuItem[] = [];
+      // Small batches keep USDA FoodData Central requests within its rate limit.
+      for (let i = 0; i < items.length; i += 4) {
+        const batch = items.slice(i, i + 4);
+        const estimates = await Promise.all(
+          batch.map((item) => estimateDishNutrition(item.components, item.estimatedPortionGrams))
+        );
+        batch.forEach((item, j) => {
+          const estimate = estimates[j];
+          reviewed.push({
+            include: estimate !== null,
+            foodName: item.name,
+            calories: estimate ? Math.round(estimate.calories).toString() : '',
+            protein: estimate ? Math.round(estimate.protein).toString() : '',
+            carbs: estimate ? Math.round(estimate.carbs).toString() : '',
+            fat: estimate ? Math.round(estimate.fat).toString() : '',
+            price: item.price,
+            components: item.components,
+            unmatchedComponents: estimate ? estimate.unmatchedComponents : item.components,
+            nutritionFound: estimate !== null,
+          });
+        });
+      }
+      setCapturedItems(reviewed);
+    } catch (error) {
+      console.error('Menu capture failed:', error);
+      const message = error instanceof AiServiceError ? error.message : 'Could not process the menu photo.';
+      Alert.alert('Menu capture failed', message);
+    } finally {
+      setMenuCaptureStatus(null);
+    }
+  };
+
+  const updateCapturedItem = (index: number, changes: Partial<CapturedMenuItem>) => {
+    setCapturedItems((items) => items && items.map((item, i) => (i === index ? { ...item, ...changes } : item)));
+  };
+
+  const saveCapturedItems = async () => {
+    if (!capturedItems || !placeId) return;
+    const selected = capturedItems.filter((item) => item.include);
+    if (selected.length === 0) {
+      Alert.alert('Nothing selected', 'Select at least one dish to add to the menu.');
+      return;
+    }
+    if (selected.some((item) => !isSavable(item))) {
+      Alert.alert('Check the values', 'Each selected dish needs a name and valid calories, protein, carbs and fat.');
+      return;
+    }
+
+    setSavingCapturedItems(true);
+    try {
+      const now = Date.now();
+      const newItems = selected.map((item, index) => ({
+        id: `${now}-${index}`,
+        foodName: item.foodName.trim(),
+        calories: Math.round(Number(item.calories)),
+        protein: Math.round(Number(item.protein)),
+        carbs: Math.round(Number(item.carbs)),
+        fat: Math.round(Number(item.fat)),
+        price: item.price,
+        createdBy: auth.currentUser?.uid || 'anonymous',
+        createdAt: new Date(),
+        source: 'menu-photo',
+        // Values are estimated from USDA FoodData Central components (or entered by the user).
+        nutritionSource: item.nutritionFound ? 'USDA FoodData Central (estimated portion)' : 'user-entered',
+        nutritionVerified: false,
+      }));
+
+      // arrayUnion avoids overwriting items other users add to the same restaurant at the same time.
+      await setDoc(
+        doc(db, 'restaurants', placeId as string),
+        {
+          placeId,
+          name,
+          address,
+          location: { lat: Number(latitude), lng: Number(longitude) },
+          items: arrayUnion(...newItems),
+        },
+        { merge: true }
+      );
+
+      const updatedItems = [...menuItems, ...newItems];
+      setMenuItems(updatedItems);
+      setFilteredMenuItems(updatedItems);
+      setCapturedItems(null);
+      Alert.alert('Menu saved', `${newItems.length} dish${newItems.length === 1 ? '' : 'es'} added to this restaurant.`);
+    } catch (error) {
+      console.error('Error saving captured menu:', error);
+      Alert.alert('Error', 'Failed to save the menu. Please try again.');
+    } finally {
+      setSavingCapturedItems(false);
+    }
+  };
+
+  const renderMenuCapture = () => {
+    if (menuCaptureStatus) {
+      return (
+        <View style={[styles.captureStatus, isDark && styles.capturePanelDark]}>
+          <ActivityIndicator size="small" color="#2ecc71" />
+          <Text style={[styles.captureStatusText, isDark && styles.textLight]}>{menuCaptureStatus}</Text>
+        </View>
+      );
+    }
+    if (!capturedItems) {
+      return (
+        <TouchableOpacity style={styles.captureButton} onPress={() => setShowMenuCamera(true)}>
+          <Camera size={18} color="#fff" />
+          <Text style={styles.captureButtonText}>Capture Menu</Text>
+        </TouchableOpacity>
+      );
+    }
+    return (
+      <View style={[styles.capturePanel, isDark && styles.capturePanelDark]}>
+        <Text style={[styles.captureTitle, isDark && styles.textLight]}>Review captured dishes</Text>
+        <Text style={[styles.captureNote, isDark && styles.macroTextDark]}>
+          Nutrition is estimated from USDA FoodData Central. Correct anything that looks wrong and untick dishes you don't want to save.
+        </Text>
+        {capturedItems.map((item, index) => (
+          <View key={index} style={[styles.capturedItem, isDark && styles.capturedItemDark, !item.include && styles.capturedItemExcluded]}>
+            <View style={styles.capturedItemHeader}>
+              <TouchableOpacity
+                style={[styles.checkbox, item.include && styles.checkboxChecked]}
+                onPress={() => updateCapturedItem(index, { include: !item.include })}
+              >
+                {item.include && <Check size={14} color="#fff" />}
+              </TouchableOpacity>
+              <TextInput
+                style={[styles.captureInput, styles.captureNameInput, isDark && styles.captureInputDark, item.include && !item.foodName.trim() && styles.captureInputInvalid]}
+                value={item.foodName}
+                onChangeText={(foodName) => updateCapturedItem(index, { foodName })}
+              />
+            </View>
+            <View style={styles.captureMacroRow}>
+              {MACRO_KEYS.map((key) => {
+                const invalid = item.include && (!isValidAmount(item[key]) || (key === 'calories' && Number(item.calories) <= 0));
+                return (
+                  <View key={key} style={styles.captureMacro}>
+                    <Text style={[styles.captureMacroLabel, isDark && styles.macroTextDark]}>
+                      {key === 'calories' ? 'kcal' : `${key[0].toUpperCase()}${key.slice(1)} (g)`}
+                    </Text>
+                    <TextInput
+                      style={[styles.captureInput, isDark && styles.captureInputDark, invalid && styles.captureInputInvalid]}
+                      value={item[key]}
+                      onChangeText={(value) => updateCapturedItem(index, { [key]: value })}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                );
+              })}
+            </View>
+            {!item.nutritionFound ? (
+              <Text style={styles.captureWarning}>No USDA match – enter the values yourself to save this dish.</Text>
+            ) : item.unmatchedComponents.length > 0 ? (
+              <Text style={styles.captureWarning}>Not matched: {item.unmatchedComponents.join(', ')}</Text>
+            ) : null}
+          </View>
+        ))}
+        <View style={styles.captureActions}>
+          <TouchableOpacity
+            style={[styles.cancelAddButton, isDark && styles.cancelAddButtonDark, styles.captureActionButton]}
+            onPress={() => setCapturedItems(null)}
+            disabled={savingCapturedItems}
+          >
+            <Text style={[styles.cancelAddText, isDark && styles.cancelAddTextDark]}>Discard</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.captureButton, styles.captureActionButton]}
+            onPress={saveCapturedItems}
+            disabled={savingCapturedItems}
+          >
+            {savingCapturedItems ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.captureButtonText}>Save to Menu</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const selectMenuItem = (item: MenuItem) => {
     router.push({
       pathname: '/(app)/meal-logging',
@@ -379,6 +596,7 @@ const RestaurantDetailsScreen: React.FC = () => {
             <Text style={styles.errorText}>{errorMsg}</Text>
           ) : (
             <>
+              {renderMenuCapture()}
               <View style={styles.searchContainer}>
                 <View style={[styles.searchInputContainer, isDark && styles.searchInputContainerDark]}>
                   <Search size={18} color={isDark ? "#aaa" : "#888"} style={styles.searchIcon} />
@@ -457,6 +675,14 @@ const RestaurantDetailsScreen: React.FC = () => {
           )}
         </View>
       </ScrollView>
+
+      <PhotoCaptureModal
+        visible={showMenuCamera}
+        title="Capture Menu"
+        hint="Keep the whole menu in frame and avoid glare."
+        onCancel={() => setShowMenuCamera(false)}
+        onConfirm={handleMenuPhotoConfirmed}
+      />
     </View>
   );
 };
@@ -704,6 +930,136 @@ const styles = StyleSheet.create({
   },
   loader: {
     marginVertical: 24,
+  },
+  captureButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2ecc71',
+    borderRadius: 8,
+    paddingVertical: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  captureButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  captureStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+    gap: 8,
+  },
+  captureStatusText: {
+    fontSize: 15,
+    color: '#333',
+  },
+  capturePanel: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  capturePanelDark: {
+    backgroundColor: '#1e1e1e',
+  },
+  captureTitle: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  captureNote: {
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 12,
+  },
+  capturedItem: {
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  capturedItemDark: {
+    borderColor: '#333',
+  },
+  capturedItemExcluded: {
+    opacity: 0.5,
+  },
+  capturedItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#2ecc71',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  checkboxChecked: {
+    backgroundColor: '#2ecc71',
+  },
+  captureInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#eee',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 14,
+    color: '#333',
+  },
+  captureInputDark: {
+    backgroundColor: '#2a2a2a',
+    borderColor: '#333',
+    color: '#f2f2f2',
+  },
+  captureInputInvalid: {
+    borderColor: '#ff6b6b',
+    borderWidth: 2,
+  },
+  captureNameInput: {
+    flex: 1,
+    fontWeight: 'bold',
+  },
+  captureMacroRow: {
+    flexDirection: 'row',
+  },
+  captureMacro: {
+    flex: 1,
+    marginHorizontal: 2,
+  },
+  captureMacroLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+  },
+  captureWarning: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#e67e22',
+  },
+  captureActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  captureActionButton: {
+    flex: 1,
+    marginBottom: 0,
+    marginTop: 0,
   },
   errorText: {
     color: '#ff6b6b',

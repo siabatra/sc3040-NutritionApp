@@ -10,6 +10,9 @@ export interface MenuItem {
   fat: number;
   createdBy?: string;
   createdAt?: Timestamp;
+  restaurantId?: string;
+  restaurantName?: string;
+  restaurantAddress?: string;
   location?: {
     name?: string;
     type?: string;
@@ -28,6 +31,8 @@ export interface MealSlot {
   budget: number;
   restaurantId?: string;
   restaurantName?: string;
+  reason?: string;
+  estimated?: boolean; // true when nutrition is an AI estimate (home meals)
 }
 
 export interface Restaurant {

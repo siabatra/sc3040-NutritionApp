@@ -42,6 +42,9 @@ const port = 4000;
 
 // --- Middleware ---
 app.use(cors());
+// Claude API routes (menu capture, meal photo logging, meal planning).
+// Mounted before bodyParser.json() because they use a larger body limit for images.
+app.use('/ai', require('./claude').router);
 app.use(bodyParser.json());
 
 // --- In-Memory OTP Store ---
