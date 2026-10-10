@@ -84,6 +84,12 @@ The service account must belong to the Firebase project configured in `project/.
 
 Only the private files above need separate sharing; source code and blank `.env.example` templates come from GitHub. Share secrets through a private channel, never in GitHub issues or public chat. These files are ignored by Git; do not use `git add -f` to include them.
 
+### Single-file private handoff
+
+The project owner has a local `GROUP-SETUP.private.md` at the repository root. It contains the actual contents of the three setup files above, their exact destination paths, and startup commands. It is ignored by Git and will not appear in a clone. Request it privately from the owner, then copy each fenced code block into the path stated above it; do not copy the Markdown headings or code fences into the destination files.
+
+This handoff contains API credentials, the email password, and a Firebase Admin private key. Share it only with trusted group members who need those credentials. Do not commit it, paste it in a GitHub issue, or upload it publicly. It excludes unused `HISTORICAL_*` credentials, duplicate service account files, and the original Git backup. It is a snapshot: after rotating credentials, update both the private source files and the handoff before sharing it again.
+
 The setup below also describes configuration for anyone creating their own Firebase project.
 
 ## Setup

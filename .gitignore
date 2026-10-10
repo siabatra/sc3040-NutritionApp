@@ -1,14 +1,26 @@
 # Private configuration (templates are safe to commit)
 .private-git-backup/
+GROUP-SETUP.private.md
+*.private.*
 .env
 .env.*
 !.env.example
+!.env.sample
+!.env.template
 
 # Credentials and signing keys
 # Covers serviceAccountKey.json and serviceAccountKey.json.json at any depth
 serviceAccountKey*.json
+service-account*.json
+service_account*.json
+credentials.json
+credentials.*.json
+client_secret*.json
+application_default_credentials.json
 *firebase-adminsdk*.json
 *.pem
+*.pfx
+*.ppk
 *.key
 *.p12
 *.p8
@@ -54,3 +66,12 @@ Thumbs.db
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# Local cloud credentials and authenticated tool state
+.aws/
+.azure/
+.gcloud/
+.config/gcloud/
+.firebase/
+.vercel/
+.netrc

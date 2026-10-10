@@ -1,8 +1,11 @@
 import { Stack } from 'expo-router';
+import { View } from 'react-native';
+import AppHelpChat from '../../components/AppHelpChat';
 
 export default function AppLayout() {
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <View style={{ flex: 1 }}>
+      <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="dashboard" />
       <Stack.Screen name="nearby-restaurants" />
       <Stack.Screen name="restaurant-details" />
@@ -13,6 +16,8 @@ export default function AppLayout() {
       <Stack.Screen name="favorite-restaurants" />
       <Stack.Screen name="settings" />
       <Stack.Screen name="plan-my-day" />
-    </Stack>
+      </Stack>
+      <AppHelpChat />
+    </View>
   );
 }

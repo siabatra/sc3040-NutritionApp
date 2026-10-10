@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebaseConfig';
-import { collection, query, where, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { MealSlot, MenuItem, Restaurant } from '../types/mealPlanner';
+import { saveDailyPlan } from '../utils/mealPlanPersistence';
 
 export interface UseMealPlannerProps {
   dietaryPreferences: string[];
@@ -70,7 +71,7 @@ export const useMealPlanner = ({ dietaryPreferences, nearbyRestaurants = [] }: U
         const availableSlots = timeSlots; // Use all slots for testing
         
         // Initialize meal plan slots
-        const initializedSlots = availableSlots.map(slot => ({
+        const initializedSlots: MealSlot[] = availableSlots.map(slot => ({
           id: slot.id,
           name: slot.name,
           time: slot.defaultTime,
@@ -289,18 +290,9 @@ export const useMealPlanner = ({ dietaryPreferences, nearbyRestaurants = [] }: U
     }
 
     try {
-      // Create today's key in format YYYY-MM-DD
-      const today = new Date();
-      const todayKey = today.toISOString().split('T')[0];
-      
-      // Save to Firestore
-      const planRef = doc(db, `users/${auth.currentUser.uid}/plans`, todayKey);
-      await setDoc(planRef, {
-        slots: slots,
-        createdAt: new Date(),
-        dietaryPreferences
-      });
-      
+      const savedSlots = await saveDailyPlan(auth.currentUser.uid, slots, dietaryPreferences);
+      setSlots(savedSlots);
+
       return true;
     } catch (error) {
       console.error('Error saving meal plan:', error);

@@ -1,5 +1,5 @@
 // PlanMyDayScreen.tsx
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import {
   View,
   Text,
@@ -18,9 +18,7 @@ import {
   doc,
   getDoc,
   collection,
-  serverTimestamp,
   updateDoc,
-  setDoc,
   getDocs
 } from 'firebase/firestore';
 import {
@@ -36,6 +34,8 @@ import {
 import { ThemeContext } from '../../context/ThemeContext';
 import MealPlanCard from '../../components/MealPlanCard';
 import { MealSlot } from '../../types/mealPlanner';
+import { dateKey, normaliseMealType } from '../../functions/lib/reporting';
+import { saveDailyPlan } from '../../utils/mealPlanPersistence';
 import { configureNotifications } from '../../utils/notifications';
 import {
   generateAiMealPlan,
@@ -105,6 +105,38 @@ const PlanMyDayScreen: React.FC = () => {
   // It will be marked false on any user edit/regeneration to allow saving.
   const [isPlanSaved, setIsPlanSaved] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [manualPlanning, setManualPlanning] = useState(false);
+  const [manualMeal, setManualMeal] = useState({ name: 'Lunch', dish: '', calories: '', protein: '', carbs: '', fat: '' });
+  const [savingManualMeal, setSavingManualMeal] = useState(false);
+  const [manualSaveMessage, setManualSaveMessage] = useState<string | null>(null);
+  const manualSaveInProgress = useRef(false);
+  const addManualMeal = async () => {
+    if (manualSaveInProgress.current) return;
+    if (!auth.currentUser) { setError('Please sign in before saving your plan.'); return; }
+    const nutrition = { calories: Number(manualMeal.calories), protein: Number(manualMeal.protein), carbs: Number(manualMeal.carbs), fat: Number(manualMeal.fat) };
+    if (!manualMeal.dish.trim() || normaliseMealType(manualMeal.name) === 'other'
+      || ['calories', 'protein', 'carbs', 'fat'].some((key) => !manualMeal[key as keyof typeof manualMeal].trim())
+      || Object.values(nutrition).some((value) => !Number.isFinite(value) || value < 0) || nutrition.calories <= 0) {
+      setError('Enter a meal type (breakfast, lunch, dinner or snack), a dish, positive calories and non-negative macro values.');
+      return;
+    }
+    const id = `manual-${Date.now()}`;
+    const newSlot: MealSlot = { id, name: manualMeal.name.trim(), time: '', locationType: 'home',
+      menuItem: { id, foodName: manualMeal.dish.trim(), ...nutrition },
+      reason: 'Manually entered home meal and nutrition.', notify: false, budget: nutrition.calories, alternatives: [] };
+    manualSaveInProgress.current = true; setSavingManualMeal(true); setError(null); setManualSaveMessage(null);
+    try {
+      const savedSlots = await saveDailyPlan(auth.currentUser.uid, [...slots, newSlot], dietaryPreferences);
+      setSlots(savedSlots); setIsPlanSaved(true);
+      setManualMeal({ name: 'Lunch', dish: '', calories: '', protein: '', carbs: '', fat: '' });
+      setManualSaveMessage('Saved for today. Analytics updates automatically after processing. This is a planned meal; log it separately when eaten.');
+    } catch (failure) {
+      setError('Could not save the planned meal. Check your connection and try again.');
+    } finally {
+      manualSaveInProgress.current = false; setSavingManualMeal(false);
+    }
+  };
+
 
   // Plan feedback and single-meal swap reasons.
   const [planFeedback, setPlanFeedback] = useState<string>('');
@@ -138,7 +170,7 @@ const PlanMyDayScreen: React.FC = () => {
           }
         }
         // Check if plan exists for today.
-        const today = new Date().toISOString().split('T')[0];
+        const today = dateKey()!;
         const planRef = doc(db, `users/${auth.currentUser.uid}/plans`, today);
         const planSnap = await getDoc(planRef);
         if (planSnap.exists()) {
@@ -368,12 +400,9 @@ const PlanMyDayScreen: React.FC = () => {
       Alert.alert('Login Required', 'Please log in first');
       return;
     }
-    const today = new Date().toISOString().split('T')[0];
     try {
-      await setDoc(doc(db, `users/${auth.currentUser.uid}/plans`, today), {
-        slots: slots,
-        createdAt: serverTimestamp()
-      });
+      const savedSlots = await saveDailyPlan(auth.currentUser.uid, slots, dietaryPreferences);
+      setSlots(savedSlots);
       setIsPlanSaved(true);
       Alert.alert('Success', 'Meal plan saved for today!', [
         { text: 'OK', onPress: () => router.push('/(app)/dashboard') }
@@ -563,7 +592,7 @@ const PlanMyDayScreen: React.FC = () => {
       ) : (
         slots.map((slot) => (
           <View key={slot.id} style={[styles.mealSlotContainer, isDark && styles.sectionDark]}>
-            {slot.menuItem ? (
+            {slot.menuItem && !slot.loggedMealId ? (
               <>
                 <MealPlanCard
                   slot={slot}
@@ -668,6 +697,22 @@ const PlanMyDayScreen: React.FC = () => {
           </Text>
         </View>
       )}
+      <TouchableOpacity accessibilityRole="button" onPress={() => setManualPlanning((open) => !open)} style={styles.generateButton}>
+        <Text style={styles.generateButtonText}>{manualPlanning ? 'Hide manual meal entry' : 'Add a home meal manually'}</Text>
+      </TouchableOpacity>
+      {manualPlanning ? <View style={[styles.section, isDark && styles.sectionDark]}>
+        <Text style={[styles.sectionTitle, isDark && styles.textLight]}>Manual home meal plan</Text>
+        <Text style={[isDark && styles.textLight, { marginBottom: 12 }]}>Enter your planned dish and nutrition from its recipe or food label. This does not use AI or verify dietary suitability. Add and save a meal to enable analytics comparisons.</Text>
+        {(['name', 'dish', 'calories', 'protein', 'carbs', 'fat'] as const).map((field) => <View key={field} style={{ marginBottom: 10 }}>
+          <Text style={isDark && styles.textLight}>{({ name: 'Meal type', dish: 'Dish name', calories: 'Calories (kcal)', protein: 'Protein (g)', carbs: 'Carbs (g)', fat: 'Fat (g)' })[field]}</Text>
+          <TextInput accessibilityLabel={`Planned ${field}`} value={manualMeal[field]}
+            onChangeText={(value) => setManualMeal((previous) => ({ ...previous, [field]: value }))}
+            keyboardType={field === 'name' || field === 'dish' ? 'default' : 'decimal-pad'}
+            style={{ borderWidth: 1, borderColor: '#888', borderRadius: 8, padding: 12, color: isDark ? '#fff' : '#333' }} />
+        </View>)}
+        <TouchableOpacity accessibilityRole="button" accessibilityState={{ disabled: savingManualMeal }} disabled={savingManualMeal} onPress={addManualMeal} style={styles.saveButton}><Text style={styles.saveButtonText}>{savingManualMeal ? 'Saving...' : 'Add and save planned meal'}</Text></TouchableOpacity>
+        {manualSaveMessage ? <Text accessibilityRole="alert" style={[{ marginTop: 12 }, isDark && styles.textLight]}>{manualSaveMessage}</Text> : null}
+      </View> : null}
       {error && (
         <View style={styles.errorContainer}>
           <AlertCircle size={20} color="#ff6b6b" />

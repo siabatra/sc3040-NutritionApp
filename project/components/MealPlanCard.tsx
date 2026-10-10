@@ -509,9 +509,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
   },
-  cardDark: {
-    backgroundColor: '#1e1e1e',
-  },
   textLight: {
     color: '#f2f2f2',
   },

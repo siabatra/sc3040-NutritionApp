@@ -6,8 +6,9 @@ import {
   getAuth,
   initializeAuth,
   type Auth,
+  connectAuthEmulator,
 } from '@firebase/auth';
-import { getFirestore, initializeFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 
 const { getReactNativePersistence } = require('@firebase/auth');
@@ -22,7 +23,12 @@ const firebaseConfig = {
   measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
-const app = initializeApp(firebaseConfig);
+// Explicit local-only mode for testing without reading or writing production data.
+const useEmulators = __DEV__ && process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATORS === 'true';
+const app = initializeApp(useEmulators ? {
+  apiKey: 'demo-api-key', projectId: 'demo-mealcare-analytics',
+  authDomain: 'localhost', appId: 'demo-mealcare-analytics',
+} : firebaseConfig);
 
 let authInstance: Auth;
 
@@ -45,5 +51,10 @@ export const db =
     ? getFirestore(app)
     : initializeFirestore(app, {
         experimentalForceLongPolling: true,
-        useFetchStreams: false,
       });
+
+if (useEmulators) {
+  const host = process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST || '127.0.0.1';
+  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+  connectFirestoreEmulator(db, host, 8080);
+}

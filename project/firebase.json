@@ -1,0 +1,5 @@
+{
+  "functions": [{ "source": "functions", "codebase": "analytics", "runtime": "nodejs22", "ignore": ["node_modules", ".git", ".npm-cache", ".emulators", "test", "scripts", "*-debug.log"] }],
+  "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
+  "emulators": { "firestore": { "port": 8080 }, "auth": { "port": 9099 }, "ui": { "enabled": false }, "singleProjectMode": true }
+}

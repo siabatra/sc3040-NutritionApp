@@ -8,13 +8,14 @@ export interface MenuItem {
   protein: number;
   carbs: number;
   fat: number;
+  restaurantName?: string;
+  restaurantAddress?: string;
   createdBy?: string;
   createdAt?: Timestamp;
   restaurantId?: string;
-  restaurantName?: string;
-  restaurantAddress?: string;
   location?: {
     name?: string;
+    address?: string;
     type?: string;
     placeId?: string;
   };
@@ -22,6 +23,8 @@ export interface MenuItem {
 
 export interface MealSlot {
   id: string;
+  loggedMealId?: string;
+  reason?: string;
   name: string;
   time: string;
   locationType: 'home' | 'restaurant';
@@ -31,7 +34,6 @@ export interface MealSlot {
   budget: number;
   restaurantId?: string;
   restaurantName?: string;
-  reason?: string;
   estimated?: boolean; // true when nutrition is an AI estimate (home meals)
 }
 
