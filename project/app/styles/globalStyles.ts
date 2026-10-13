@@ -1,16 +1,15 @@
-// styles/globalStyles.ts
 import { StyleSheet } from 'react-native';
 
 export default StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff', // switch to '#000000' for dark mode if needed
+    backgroundColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
   },
   button: {
-    backgroundColor: '#2ecc71', // green
+    backgroundColor: '#2ecc71',
     padding: 12,
     borderRadius: 8,
     marginVertical: 8,
@@ -18,7 +17,7 @@ export default StyleSheet.create({
     maxWidth: 300,
   },
   buttonText: {
-    color: '#ffffff', // white text
+    color: '#ffffff',
     fontWeight: 'bold',
     textAlign: 'center',
     fontSize: 16,

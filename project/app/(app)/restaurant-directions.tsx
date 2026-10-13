@@ -1,4 +1,3 @@
-// Restaurant Directions Screen (app/(app)/restaurant-directions.tsx)
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, Linking } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -34,21 +33,20 @@ interface Coordinates {
 
 const RestaurantDirectionsScreen: React.FC = () => {
   const params = useLocalSearchParams();
-  const { placeId, name, latitude, longitude, address } = params;
+  const { name, latitude, longitude, address } = params;
   
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [directions, setDirections] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [transportMode, setTransportMode] = useState<TransportMode>('driving');
-  const [apiKey, setApiKey] = useState(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY);
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
   
   const restaurantLocation: Coordinates = {
     latitude: Number(latitude),
     longitude: Number(longitude)
   };
   
-  // Get user location
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -56,12 +54,10 @@ const RestaurantDirectionsScreen: React.FC = () => {
         let { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
           setErrorMsg('Permission to access location was denied');
-          // Use a default location (e.g., Singapore)
           setUserLocation({
             latitude: 1.3521,
             longitude: 103.8198
           });
-          // Try to fetch directions with default location
           fetchDirections({
             latitude: 1.3521,
             longitude: 103.8198
@@ -78,17 +74,14 @@ const RestaurantDirectionsScreen: React.FC = () => {
         };
         setUserLocation(userCoords);
         
-        // Fetch directions
         fetchDirections(userCoords, restaurantLocation, transportMode);
       } catch (error) {
         console.error('Error getting location:', error);
         setErrorMsg('Could not fetch your location. Using default location.');
-        // Use a default location
         setUserLocation({
           latitude: 1.3521,
           longitude: 103.8198
         });
-        // Try to fetch directions with default location
         fetchDirections({
           latitude: 1.3521,
           longitude: 103.8198
@@ -99,7 +92,6 @@ const RestaurantDirectionsScreen: React.FC = () => {
     })();
   }, []);
   
-  // Fetch directions when transport mode changes
   useEffect(() => {
     if (userLocation) {
       fetchDirections(userLocation, restaurantLocation, transportMode);
@@ -114,23 +106,17 @@ const RestaurantDirectionsScreen: React.FC = () => {
     setLoading(true);
     
     try {
-      console.log(`Fetching directions from ${origin.latitude},${origin.longitude} to ${destination.latitude},${destination.longitude} via ${mode}`);
       const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&mode=${mode}&key=${apiKey}`;
       
-      console.log("Directions API URL:", url);
       const response = await fetch(url);
       const data: DirectionsResult = await response.json();
-      
-      console.log("Directions API status:", data.status);
-      
+
       if (data.routes && data.routes.length > 0) {
-        console.log("Got directions successfully");
         setDirections(data);
         setErrorMsg(null);
       } else {
         console.error("No routes found in directions response");
         setErrorMsg('Could not find directions to this location. Try a different transport mode.');
-        // Create a simple mock directions response
         setDirections({
           routes: [{
             overview_polyline: {
@@ -146,7 +132,6 @@ const RestaurantDirectionsScreen: React.FC = () => {
     } catch (error) {
       console.error('Error fetching directions:', error);
       setErrorMsg('Failed to fetch directions. Try a different transport mode.');
-      // Create a simple mock directions response
       setDirections({
         routes: [{
           overview_polyline: {
@@ -163,15 +148,11 @@ const RestaurantDirectionsScreen: React.FC = () => {
     }
   };
   
-  // Simple polyline encoder for fallback when API fails
   const encodePath = (points: Coordinates[]): string => {
-    // This is a very simplified encoder that doesn't actually create a valid polyline
-    // But it's enough to have something to display when the API fails
     return "whatever";
   };
   
   const decodePolyline = (encoded: string): Coordinates[] => {
-    // This function decodes an encoded polyline string into an array of coordinates
     if (!encoded) return [];
     
     const poly: Coordinates[] = [];
@@ -211,7 +192,6 @@ const RestaurantDirectionsScreen: React.FC = () => {
       }
     } catch (error) {
       console.error("Error decoding polyline:", error);
-      // If decoding fails, just connect origin and destination directly
       if (userLocation) {
         return [userLocation, restaurantLocation];
       }
@@ -221,7 +201,6 @@ const RestaurantDirectionsScreen: React.FC = () => {
     return poly;
   };
   
-  // Get appropriate map region to show both points and the route
   const getMapRegion = () => {
     if (!userLocation) {
       return {
@@ -232,11 +211,9 @@ const RestaurantDirectionsScreen: React.FC = () => {
       };
     }
     
-    // Calculate the center point
     const centerLat = (userLocation.latitude + Number(latitude)) / 2;
     const centerLng = (userLocation.longitude + Number(longitude)) / 2;
     
-    // Calculate appropriate deltas to show both points
     const latDelta = Math.abs(userLocation.latitude - Number(latitude)) * 2.5;
     const lngDelta = Math.abs(userLocation.longitude - Number(longitude)) * 2.5;
     
@@ -265,7 +242,6 @@ const RestaurantDirectionsScreen: React.FC = () => {
     };
   };
   
-  // Open in native maps app
   const openInMaps = () => {
     try {
       const scheme = Platform.select({ ios: 'maps:0,0?q=', android: 'geo:0,0?q=' });
@@ -501,7 +477,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   map: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   webMapPlaceholder: {
     flex: 1,

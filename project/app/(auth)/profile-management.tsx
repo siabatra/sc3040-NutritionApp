@@ -1,4 +1,3 @@
-// Profile Management Screen (app/(auth)/profile-management.tsx) - FINAL VERSION with Centered Inputs
 import React, { useState } from 'react';
 import {
   View,
@@ -13,11 +12,10 @@ import {
   StatusBar
 } from 'react-native';
 import { router } from 'expo-router';
-import globalStyles from '../styles/globalStyles'; // Assuming you have this
+import globalStyles from '../styles/globalStyles';
 import { db, auth } from '../../firebaseConfig';
 import { doc, setDoc } from 'firebase/firestore';
 
-// --- Constants ---
 interface ActivityLevelOption {
   value: string;
   label: string;
@@ -53,10 +51,8 @@ const GOAL_TYPES: GoalTypeOption[] = [
   { value: 'maintain', label: 'Maintain Weight', adjustment: 0 },
   { value: 'gain', label: 'Gain Weight', adjustment: 500 }
 ];
-// --- End Constants ---
 
 const ProfileManagementScreen: React.FC = () => {
-  // State Variables
   const [weight, setWeight] = useState<string>('');
   const [height, setHeight] = useState<string>('');
   const [age, setAge] = useState<string>('');
@@ -68,7 +64,6 @@ const ProfileManagementScreen: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [saving, setSaving] = useState<boolean>(false);
 
-  // --- Helper Functions ---
   const calculateTDEE = (
     weightKg: number,
     heightCm: number,
@@ -77,46 +72,40 @@ const ProfileManagementScreen: React.FC = () => {
     userActivityLevel: string
   ): number => {
     if (!weightKg || !heightCm || !ageYears || !userSex || !userActivityLevel) {
-      return 0; // Not enough info
+      return 0;
     }
-    // Mifflin-St Jeor Equation
     let bmr =
       userSex.toLowerCase() === 'male'
         ? 10 * weightKg + 6.25 * heightCm - 5 * ageYears + 5
         : 10 * weightKg + 6.25 * heightCm - 5 * ageYears - 161;
 
     const activityOption = ACTIVITY_LEVELS.find(level => level.value === userActivityLevel);
-    const activityMultiplier = activityOption ? activityOption.multiplier : 1.2; // Default to sedentary if not found
+    const activityMultiplier = activityOption ? activityOption.multiplier : 1.2;
 
     return Math.round(bmr * activityMultiplier);
   };
 
   const calculateDailyTarget = (tdee: number, selectedGoalType: string): number => {
-    // Ensure selectedGoalType is valid before finding the goal
     const validGoalTypes: Array<'lose' | 'maintain' | 'gain'> = ['lose', 'maintain', 'gain'];
-    if (tdee <= 0 || !validGoalTypes.includes(selectedGoalType as any)) return tdee > 0 ? tdee : 0; // Return TDEE if valid, else 0
+    if (tdee <= 0 || !validGoalTypes.includes(selectedGoalType as any)) return tdee > 0 ? tdee : 0;
 
     const goal = GOAL_TYPES.find(g => g.value === selectedGoalType);
-    const adjustment = goal ? goal.adjustment : 0; // Default to maintain if goal not found
+    const adjustment = goal ? goal.adjustment : 0;
     const target = tdee + adjustment;
 
-    // Ensure minimum healthy calorie intake (adjust threshold if needed)
     return Math.max(1200, target);
   };
 
   const toggleDietaryPreference = (id: string) => {
-    setErrorMessage(''); // Clear error on interaction
+    setErrorMessage('');
     if (selectedDietary.includes(id)) {
       setSelectedDietary(selectedDietary.filter(item => item !== id));
     } else {
       setSelectedDietary([...selectedDietary, id]);
     }
   };
-  // --- End Helper Functions ---
 
-  // --- Submit Handler ---
   const handleProfileSubmit = async () => {
-    // --- Validation ---
     if (!name.trim()) { setErrorMessage('Please enter your name'); return; }
     if (!weight || !height || !age) { setErrorMessage('Please enter your weight, height, and age'); return; }
     if (!sex) { setErrorMessage('Please select your sex'); return; }
@@ -135,12 +124,10 @@ const ProfileManagementScreen: React.FC = () => {
     setErrorMessage('');
     setSaving(true);
 
-    // --- Calculations ---
     const calculatedTDEE = calculateTDEE(weightNum, heightNum, ageNum, sex, activityLevel);
-    const currentGoalType = goalType || 'maintain'; // Use selected or default
+    const currentGoalType = goalType || 'maintain';
     const calculatedDailyTarget = calculateDailyTarget(calculatedTDEE, currentGoalType);
 
-    // --- Firestore Update ---
     if (auth.currentUser) {
       try {
         const userData = {
@@ -162,7 +149,7 @@ const ProfileManagementScreen: React.FC = () => {
         };
 
         const userDocRef = doc(db, 'users', auth.currentUser.uid);
-        await setDoc(userDocRef, userData, { merge: true }); // Use merge: true
+        await setDoc(userDocRef, userData, { merge: true });
 
         router.replace('/(app)/dashboard');
 
@@ -179,16 +166,13 @@ const ProfileManagementScreen: React.FC = () => {
       Alert.alert("Authentication Error", "You are not logged in. Please sign out and sign in again.");
     }
   };
-  // --- End Submit Handler ---
 
-  // --- Render ---
   return (
     <ScrollView
       style={styles.scrollContainer}
       contentContainerStyle={styles.scrollContentContainer}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Add StatusBar padding */}
       <View style={{ height: Platform.OS === 'android' ? StatusBar.currentHeight : 40 }} />
 
       <View style={[globalStyles.container, styles.contentContainer]}>
@@ -197,13 +181,11 @@ const ProfileManagementScreen: React.FC = () => {
           Tell us a bit about yourself for personalized nutrition tracking.
         </Text>
 
-        {/* --- Full Name --- */}
         <View style={styles.inputGroup}>
           <Text style={[styles.label, styles.centeredLabel]}>Full Name</Text>
-          {/* Wrap TextInput in a View for centering */}
           <View style={styles.centeredInputContainer}>
             <TextInput
-              style={[globalStyles.inputField, styles.inputFieldSizing]} // Keep text left, control width
+              style={[globalStyles.inputField, styles.inputFieldSizing]}
               placeholder="Enter your full name"
               placeholderTextColor="#aaa"
               onChangeText={setName}
@@ -213,13 +195,11 @@ const ProfileManagementScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* --- Biometrics --- */}
         <View style={styles.inputGroup}>
           <Text style={[styles.label, styles.centeredLabel]}>Weight (kg)</Text>
-           {/* Wrap TextInput in a View for centering */}
           <View style={styles.centeredInputContainer}>
             <TextInput
-              style={[globalStyles.inputField, styles.inputFieldSizing]} // Keep text left, control width
+              style={[globalStyles.inputField, styles.inputFieldSizing]}
               placeholder="e.g., 70"
               placeholderTextColor="#aaa"
               keyboardType="numeric"
@@ -231,10 +211,9 @@ const ProfileManagementScreen: React.FC = () => {
 
         <View style={styles.inputGroup}>
           <Text style={[styles.label, styles.centeredLabel]}>Height (cm)</Text>
-           {/* Wrap TextInput in a View for centering */}
           <View style={styles.centeredInputContainer}>
             <TextInput
-              style={[globalStyles.inputField, styles.inputFieldSizing]} // Keep text left, control width
+              style={[globalStyles.inputField, styles.inputFieldSizing]}
               placeholder="e.g., 175"
               placeholderTextColor="#aaa"
               keyboardType="numeric"
@@ -246,10 +225,9 @@ const ProfileManagementScreen: React.FC = () => {
 
         <View style={styles.inputGroup}>
           <Text style={[styles.label, styles.centeredLabel]}>Age</Text>
-           {/* Wrap TextInput in a View for centering */}
           <View style={styles.centeredInputContainer}>
             <TextInput
-              style={[globalStyles.inputField, styles.inputFieldSizing]} // Keep text left, control width
+              style={[globalStyles.inputField, styles.inputFieldSizing]}
               placeholder="e.g., 30"
               placeholderTextColor="#aaa"
               keyboardType="numeric"
@@ -259,7 +237,6 @@ const ProfileManagementScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* --- Sex --- */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Sex</Text>
           <View style={styles.radioOptionsRow}>
@@ -278,7 +255,6 @@ const ProfileManagementScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* --- Activity Level --- */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Activity Level</Text>
           {ACTIVITY_LEVELS.map((level) => (
@@ -293,7 +269,6 @@ const ProfileManagementScreen: React.FC = () => {
           ))}
         </View>
 
-        {/* --- Dietary Preferences --- */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Dietary Preferences (Optional)</Text>
            <View style={styles.dietaryContainer}>
@@ -309,7 +284,6 @@ const ProfileManagementScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* --- Weight Goal --- */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Weight Goal</Text>
            {GOAL_TYPES.map((goal) => (
@@ -329,10 +303,8 @@ const ProfileManagementScreen: React.FC = () => {
           ))}
         </View>
 
-        {/* --- Error Message --- */}
         {errorMessage ? <Text style={[globalStyles.errorText, styles.errorText]}>{errorMessage}</Text> : null}
 
-        {/* --- Submit Button (Centered) --- */}
         <View style={styles.buttonContainer}>
           <TouchableOpacity
             onPress={handleProfileSubmit}
@@ -351,7 +323,6 @@ const ProfileManagementScreen: React.FC = () => {
   );
 };
 
-// --- Styles ---
 const styles = StyleSheet.create({
   scrollContainer: {
     flex: 1,
@@ -368,7 +339,7 @@ const styles = StyleSheet.create({
   },
   mainTitle: {
     marginTop: 10,
-    textAlign: 'center', // Center the main title as well
+    textAlign: 'center',
   },
   subtitle: {
       marginBottom: 30,
@@ -386,20 +357,17 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   centeredLabel: {
-    textAlign: 'center', // Center specific labels
+    textAlign: 'center',
   },
-  // New style to center the TextInput container
   centeredInputContainer: {
     width: '100%',
-    alignItems: 'center', // Center children (the TextInput) horizontally
+    alignItems: 'center',
   },
-  // Style to control TextInput width and ensure left alignment
   inputFieldSizing: {
-      width: '90%', // Make input slightly less than full width
+      width: '90%',
       maxWidth: 400,
-      textAlign: 'left', // Explicitly keep placeholder and text left-aligned
-      letterSpacing: 0, // Prevent unwanted spacing
-      // Inherit other styles from globalStyles.inputField
+      textAlign: 'left',
+      letterSpacing: 0,
   },
   radioOptionsRow: {
     flexDirection: 'row',

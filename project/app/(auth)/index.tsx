@@ -1,4 +1,3 @@
-// Landing Screen (app/(auth)/index.tsx)
 import React from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
@@ -54,7 +53,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   loginButton: {
-    backgroundColor: '#1d8348', // Darker green
+    backgroundColor: '#1d8348',
   },
 });
 

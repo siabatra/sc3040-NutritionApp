@@ -1,4 +1,3 @@
-// ThemeContext.tsx
 import React, { createContext, useState, useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 import { auth, db } from '../firebaseConfig';
@@ -20,7 +19,6 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const deviceColorScheme = useColorScheme();
   const [theme, setTheme] = useState<'light' | 'dark'>(deviceColorScheme === 'dark' ? 'dark' : 'light');
 
-  // Fetch user preferences from Firestore on mount
   useEffect(() => {
     const fetchUserPreferences = async () => {
       if (auth.currentUser) {
@@ -43,7 +41,6 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const newTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(newTheme);
     
-    // Save the preference to Firestore if user is logged in
     if (auth.currentUser) {
       try {
         await updateDoc(doc(db, 'users', auth.currentUser.uid), {

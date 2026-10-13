@@ -1,6 +1,5 @@
-// Account Created Screen (app/(auth)/account-created.tsx)
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
 import globalStyles from '../styles/globalStyles';
 import { CircleCheck as CheckCircle } from 'lucide-react-native';

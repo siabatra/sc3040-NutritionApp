@@ -1,4 +1,3 @@
-//(auth)/password-reset.tsx
 import React, { useState, useEffect } from 'react';
 import { 
     View, 
@@ -6,28 +5,25 @@ import {
     TextInput, 
     TouchableOpacity, 
     StyleSheet,
-    ActivityIndicator, // Added
-    Alert             // Added
+    ActivityIndicator,
+    Alert
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router'; // Added useLocalSearchParams
+import { router, useLocalSearchParams } from 'expo-router';
 import globalStyles from '../styles/globalStyles';
-import axios from 'axios'; // Added
+import axios from 'axios';
+import { localServerUrl } from '../../utils/serverUrl';
 
-// --- Server URL ---
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL; // Use your actual server URL
-// ---
+const SERVER_URL = localServerUrl(process.env.EXPO_PUBLIC_SERVER_URL, 4000);
 
 const PasswordResetScreen: React.FC = () => {
   const [newPassword, setNewPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false); // Added loading state
+  const [loading, setLoading] = useState<boolean>(false);
 
-  // Get the verified email passed from OTP screen
   const { email } = useLocalSearchParams<{ email: string }>();
 
    useEffect(() => {
-    // Validate that email parameter exists
     if (!email) {
       Alert.alert("Error", "Verified email not found. Please restart the password reset process.", [
         { text: "OK", onPress: () => router.replace('/(auth)/forgot-password') } 
@@ -35,7 +31,6 @@ const PasswordResetScreen: React.FC = () => {
       setErrorMessage('Error: Missing email parameter.');
     }
   }, [email]);
-
 
   const doDisplayPasswordResetFields = () => (
     <>
@@ -62,9 +57,7 @@ const PasswordResetScreen: React.FC = () => {
     </>
   );
 
-  // Renamed function for clarity
   const handleUpdatePassword = async () => {
-    // Check if email is present (verified by useEffect, but double-check)
      if (!email) {
        setErrorMessage('Error: Cannot reset password without a verified email.');
        return;
@@ -84,21 +77,18 @@ const PasswordResetScreen: React.FC = () => {
     setErrorMessage('');
 
     try {
-      // Call the NEW server endpoint to reset the password
       const response = await axios.post(`${SERVER_URL}/reset-password`, {
         email: email,
-        newPassword: newPassword // Send email and new password
+        newPassword: newPassword
       });
 
       if (response.data.success) {
         Alert.alert("Success", "Your password has been updated successfully.", [
-            { text: "OK", onPress: () => router.replace('/(auth)/') } // Navigate to login
+            { text: "OK", onPress: () => router.replace('/(auth)/') }
         ]);
-        // Optionally clear fields
         setNewPassword('');
         setConfirmPassword('');
       } else {
-         // Handle server errors (e.g., user not found by admin, update failed)
          setErrorMessage(response.data.message || 'Failed to update password.');
          Alert.alert("Error", response.data.message || 'An unexpected error occurred.');
       }
@@ -126,7 +116,6 @@ const PasswordResetScreen: React.FC = () => {
            <Text style={globalStyles.buttonText}>Update Password</Text>
         )}
       </TouchableOpacity>
-       {/* Optional: Add a back button if needed */}
        <TouchableOpacity onPress={() => router.back()} disabled={loading}>
             <Text style={[globalStyles.link, styles.backLink, loading && styles.linkDisabled]}>
                 Cancel
@@ -136,7 +125,6 @@ const PasswordResetScreen: React.FC = () => {
   );
 };
 
-// Add styles for loading state and email display
 const styles = StyleSheet.create({
    emailText: {
       fontSize: 16,
@@ -155,6 +143,5 @@ const styles = StyleSheet.create({
       marginTop: 15, 
    }
 });
-
 
 export default PasswordResetScreen;

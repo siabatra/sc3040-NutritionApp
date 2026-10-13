@@ -62,7 +62,6 @@ async function rebuildUserData(db, uid, asOf = new Date(), options = {}) {
     const period = periodFor(today, type);
     return [period.id, period];
   }));
-  // Include the previous day: at a week/month boundary its period just closed.
   const yesterday = dateKey(new Date(asOf.getTime() - 86400000));
   for (const type of ['day', 'week', 'month', 'year']) {
     const period = periodFor(yesterday, type);
@@ -77,7 +76,6 @@ async function rebuildUserData(db, uid, asOf = new Date(), options = {}) {
     }
   }
   if (options.forceHistorical || !state.exists || state.data().schemaVersion !== 1 || state.data().insightsVersion !== 1 || state.data().periodVersion !== 2) {
-    // One-time backfill for prototype data. Subsequent jobs only read affected periods.
     const [logDocs, planDocs, oldRollups] = await Promise.all([
       readAll(db.collection('mealLogs').where('userId', '==', uid)),
       readAll(userRef.collection('plans')),
@@ -114,7 +112,6 @@ async function rebuildUserData(db, uid, asOf = new Date(), options = {}) {
       await writeRollups(db, uid, [buildRollup(period, logs, plans, asOf, profile)], updatedAt);
     }
   }
-  // Preserve a new edit arriving while aggregation was running for the next nightly job.
   for (const entry of pending) {
     await db.runTransaction(async (transaction) => {
       const current = await transaction.get(entry.ref);
@@ -122,7 +119,6 @@ async function rebuildUserData(db, uid, asOf = new Date(), options = {}) {
     });
   }
   await stateRef.set({ lastRunAt: asOf }, { merge: true });
-  // A profile deleted during a job must not leave orphaned analytics behind.
   if (!(await userRef.get()).exists) await deleteAnalytics(db, uid);
 }
 
@@ -133,7 +129,9 @@ async function rebuildUser(db, uid, asOf = new Date(), options = {}) {
   const acquired = await db.runTransaction(async (transaction) => {
     const [user, lock] = await Promise.all([transaction.get(userRef), transaction.get(lockRef)]);
     if (!user.exists) return false;
-    if (lock.data()?.expiresAt?.toMillis() > Date.now()) throw new Error('Analytics rebuild already running; retry later.');
+    if (lock.data()?.expiresAt?.toMillis() > Date.now()) {
+      throw Object.assign(new Error('Analytics rebuild already running; retry later.'), { code: 'analytics/busy' });
+    }
     transaction.set(lockRef, { token, expiresAt: new Date(Date.now() + 600000) });
     return true;
   });

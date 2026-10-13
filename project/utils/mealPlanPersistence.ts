@@ -9,7 +9,6 @@ export async function saveDailyPlan(uid: string, slots: MealSlot[], dietaryPrefe
   return runTransaction(db, async (transaction) => {
     const existing = await transaction.get(ref);
     const oldSlots: MealSlot[] = existing.data()?.slots || [];
-    // Completed slots keep their original planned values even if the rest is regenerated.
     const completed = oldSlots.filter((slot) => slot.loggedMealId);
     const matches = (left: MealSlot, right: MealSlot) => left.id === right.id
       || (normaliseMealType(left.name) !== 'other' && normaliseMealType(left.name) === normaliseMealType(right.name));

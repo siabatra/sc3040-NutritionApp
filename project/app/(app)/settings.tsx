@@ -1,4 +1,3 @@
-// Settings Screen (app/(app)/settings.tsx)
 import React, { useState, useEffect, useContext } from 'react';
 import { 
   View, 
@@ -16,7 +15,7 @@ import { router } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { updateEmail, signOut } from 'firebase/auth';
-import { ArrowLeft, Save, Mail, User, Scale, Ruler, Calendar, CircleUser as UserCircle, Activity, Heart, AtSign, Bell, Moon, LogOut } from 'lucide-react-native';
+import { ArrowLeft, Save, Mail, User, Scale, Ruler, Calendar, CircleUser as UserCircle, Activity, Heart, Moon, LogOut } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
 
 interface UserSettings {
@@ -79,7 +78,6 @@ const SettingsScreen: React.FC = () => {
   const [selectedDietary, setSelectedDietary] = useState<string[]>([]);
   const [editEmail, setEditEmail] = useState<boolean>(false);
   const [newEmail, setNewEmail] = useState<string>('');
-  const [confirmChanges, setConfirmChanges] = useState<boolean>(false);
 
   const { theme, toggleTheme } = useContext(ThemeContext);
   const isDark = theme === 'dark';
@@ -106,7 +104,6 @@ const SettingsScreen: React.FC = () => {
         setSelectedDietary(userData.dietaryPreferences || []);
         setNewEmail(userData.email || auth.currentUser.email || '');
       } else {
-        // If user doc doesn't exist, initialize with default values
         const defaultSettings: UserSettings = {
           email: auth.currentUser.email || '',
           notifications: true,
@@ -126,7 +123,6 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
-  // Update darkMode setting when theme changes
   useEffect(() => {
     setSettings(prev => ({
       ...prev,
@@ -141,7 +137,6 @@ const SettingsScreen: React.FC = () => {
     sex: string,
     activityLevel: string
   ): number => {
-    // Mifflin-St Jeor Equation
     let bmr =
       sex.toLowerCase() === 'male'
         ? 10 * weight + 6.25 * height - 5 * age + 5
@@ -156,7 +151,7 @@ const SettingsScreen: React.FC = () => {
   const calculateDailyTarget = (tdee: number, goalType: string): number => {
     const goal = GOAL_TYPES.find(g => g.value === goalType);
     const adjustment = goal ? goal.adjustment : 0;
-    return Math.max(1200, tdee + adjustment); // Ensure minimum healthy calorie intake
+    return Math.max(1200, tdee + adjustment);
   };
 
   const handleSaveSettings = async () => {
@@ -165,7 +160,6 @@ const SettingsScreen: React.FC = () => {
       return;
     }
 
-    // Form validation
     if (settings.weight && (settings.weight < 30 || settings.weight > 300)) {
       Alert.alert('Error', 'Please enter a valid weight (30-300 kg)');
       return;
@@ -186,10 +180,8 @@ const SettingsScreen: React.FC = () => {
     try {
       let updatedSettings = { ...settings };
       
-      // Update dietary preferences
       updatedSettings.dietaryPreferences = selectedDietary;
       
-      // Recalculate TDEE and daily target if biometric data changed
       if (settings.weight && settings.height && settings.age && settings.sex && settings.activityLevel) {
         const newTDEE = calculateTDEE(
           settings.weight,
@@ -206,7 +198,6 @@ const SettingsScreen: React.FC = () => {
         );
       }
       
-      // Update email if changed
       if (editEmail && newEmail !== auth.currentUser.email && newEmail.trim()) {
         try {
           await updateEmail(auth.currentUser, newEmail);
@@ -217,13 +208,11 @@ const SettingsScreen: React.FC = () => {
         }
       }
       
-      // Save to Firestore
       await updateDoc(doc(db, 'users', auth.currentUser.uid), updatedSettings);
       
       setSettings(updatedSettings);
       Alert.alert('Success', 'Settings saved successfully');
       setEditEmail(false);
-      setConfirmChanges(false);
     } catch (error) {
       console.error('Error saving settings:', error);
       Alert.alert('Error', 'Failed to save settings. Please try again.');
@@ -256,7 +245,6 @@ const SettingsScreen: React.FC = () => {
   };
 
   const handleConfirmChanges = () => {
-    // Calculate TDEE to show preview
     if (settings.weight && settings.height && settings.age && settings.sex && settings.activityLevel) {
       const newTDEE = calculateTDEE(
         settings.weight,

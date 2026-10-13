@@ -1,6 +1,5 @@
-// Login Screen (app/(auth)/login.tsx)
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { router } from 'expo-router';
 import globalStyles from '../styles/globalStyles';
 import { auth } from '../../firebaseConfig';

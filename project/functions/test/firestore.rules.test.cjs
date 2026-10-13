@@ -30,7 +30,6 @@ beforeEach(async () => environment.clearFirestore());
 after(async () => { await environment?.cleanup(); if (adminApp) await deleteApp(adminApp); });
 
 function serviceFor(db, name = 'mealPlanPersistence') {
-  // Compile the actual application service; replace only its database connection.
   const ts = require('../../node_modules/typescript');
   const filename = path.resolve(__dirname, `../../utils/${name}.ts`);
   const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
@@ -178,7 +177,6 @@ test('frontend summary reads and longer existing views use only precomputed mont
   await assertFails(serviceFor(bob, 'analytics').fetchAnalyticsRollup('alice', selected));
 });
 
-
 test('upgrades historical summaries and combines insights across monthly targets', async () => {
   await adminDb.doc('users/alice').set({ dailyCalorieTarget: 2000 });
   await adminDb.doc('users/alice/analyticsState/rollup').set({ schemaVersion: 1 });
@@ -206,7 +204,6 @@ test('upgrades historical summaries and combines insights across monthly targets
   assert.deepEqual(legacy.insights, []);
 });
 
-
 test('explicit local backfill refreshes old edits without deployed dirty triggers', async () => {
   await adminDb.doc('users/alice').set({});
   const log = adminDb.doc('mealLogs/local-old');
@@ -221,7 +218,6 @@ test('explicit local backfill refreshes old edits without deployed dirty trigger
   await rebuildUser(adminDb, 'alice', asOf, { forceHistorical: true });
   assert.equal((await rollup.get()).data().actual.calories, 0);
 });
-
 
 test('live worker and frontend subscription update one-entry gaps, adherence and edited/deleted totals', async () => {
   const { spawn } = require('node:child_process');
@@ -264,7 +260,6 @@ test('live worker and frontend subscription update one-entry gaps, adherence and
     assert.equal(removed.actual.calories, 0); assert.equal(removed.adherencePercent, 0);
   } finally { stop(); worker.kill(); }
 });
-
 
 test('daily, weekly, monthly and yearly summaries expose the same single-entry comparison', async () => {
   const alice = environment.authenticatedContext('alice').firestore();

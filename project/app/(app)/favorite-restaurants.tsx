@@ -1,6 +1,5 @@
-// Favorite Restaurants Screen (app/(app)/favorite-restaurants.tsx)
 import React, { useState, useEffect, useContext } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
@@ -28,7 +27,7 @@ const FavoriteRestaurantsScreen: React.FC = () => {
   const [favoriteRestaurants, setFavoriteRestaurants] = useState<RestaurantDetails[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [apiKey, setApiKey] = useState(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY);
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   useEffect(() => {
     fetchFavorites();
@@ -45,7 +44,6 @@ const FavoriteRestaurantsScreen: React.FC = () => {
     setError(null);
 
     try {
-      // Get user's favorite restaurant IDs
       const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
       if (!userDoc.exists() || !userDoc.data().favorites || userDoc.data().favorites.length === 0) {
         setLoading(false);
@@ -55,9 +53,7 @@ const FavoriteRestaurantsScreen: React.FC = () => {
 
       const favoriteIds = userDoc.data().favorites;
       
-      // Fetch details for each favorite restaurant
       const detailsPromises = favoriteIds.map(async (placeId: string) => {
-        // First check if we have this restaurant in our database
         const restaurantDoc = await getDoc(doc(db, 'restaurants', placeId));
         
         if (restaurantDoc.exists()) {
@@ -69,10 +65,8 @@ const FavoriteRestaurantsScreen: React.FC = () => {
             geometry: {
               location: data.location || { lat: 0, lng: 0 }
             },
-            // Add any other fields we have stored
           };
         } else {
-          // If not in our database, fetch from Google Places API
           try {
             const response = await fetch(
               `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,geometry,rating&key=${apiKey}`
@@ -89,7 +83,6 @@ const FavoriteRestaurantsScreen: React.FC = () => {
               };
             } else {
               console.error(`Failed to fetch details for place ID: ${placeId}`);
-              // Return a placeholder for failed fetches
               return {
                 place_id: placeId,
                 name: "Restaurant Information Unavailable",
@@ -101,7 +94,6 @@ const FavoriteRestaurantsScreen: React.FC = () => {
             }
           } catch (error) {
             console.error(`Error fetching details for place ID: ${placeId}`, error);
-            // Return a placeholder for failed fetches
             return {
               place_id: placeId,
               name: "Restaurant Information Unavailable",
@@ -114,7 +106,6 @@ const FavoriteRestaurantsScreen: React.FC = () => {
         }
       });
       
-      // Wait for all detail fetches to complete
       const restaurantDetails = await Promise.all(detailsPromises);
       setFavoriteRestaurants(restaurantDetails);
     } catch (error) {
@@ -210,7 +201,7 @@ const FavoriteRestaurantsScreen: React.FC = () => {
           keyExtractor={(item) => item.place_id}
           contentContainerStyle={[
             styles.listContainer,
-            { paddingBottom: 80 } // Add extra padding for the bottom tab bar
+            { paddingBottom: 80 }
           ]}
           showsVerticalScrollIndicator={false}
         />

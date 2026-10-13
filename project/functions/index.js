@@ -39,7 +39,6 @@ exports.markPlanAnalyticsDirty = onDocumentWritten({
   await markDates(db, event.params.uid, keys);
 });
 
-// Per-user tasks keep the nightly scheduler bounded as the user base grows.
 exports.rebuildUserAnalytics = onTaskDispatched({
   region: REGION, timeoutSeconds: 540, memory: '512MiB',
   retryConfig: { maxAttempts: 5, minBackoffSeconds: 60 },

@@ -1,6 +1,5 @@
 'use strict';
 
-// Descriptive observations about recorded meals, never inferred missing intake.
 function buildInsights(data) {
   if (!data.insightStats) return [];
   const { breakfastDays, targetCalories, targetDays } = data.insightStats;

@@ -1,12 +1,9 @@
-// Full-screen camera used for meal-photo logging and menu capture.
-// Flow: camera -> preview -> retake or confirm -> compressed JPEG (base64) passed to onConfirm.
 import React, { useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, Image, ActivityIndicator, Platform } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { X, RotateCcw, Check } from 'lucide-react-native';
 
-// Claude downsizes larger images anyway, so this keeps uploads small and fast.
 const MAX_WIDTH = 1280;
 
 interface PhotoCaptureModalProps {

@@ -1,4 +1,3 @@
-// MealPlanCard.tsx
 import React, { useState, useContext } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Switch, Platform } from 'react-native';
 import {
@@ -42,7 +41,6 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
 
   const [showTimePicker, setShowTimePicker] = useState<boolean>(false);
 
-  // Convert "HH:MM" to Date
   const getTimeAsDate = (timeString: string) => {
     if (!timeString) return new Date();
     const parts = timeString.split(':');
@@ -53,7 +51,6 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
     return date;
   };
 
-  // Format "HH:MM" -> "hh:mm AM/PM"
   const formatTimeForDisplay = (time: string) => {
     if (!time) return 'No time set';
     const [hoursStr, minutesStr] = time.split(':');
@@ -64,20 +61,16 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
     return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
   };
 
-  // When user picks a time from the OS time picker
   const handleTimeChange = async (event: any, selectedDate?: Date) => {
-    setShowTimePicker(false); // hide after selection on Android
+    setShowTimePicker(false);
     if (selectedDate) {
       const hours = selectedDate.getHours().toString().padStart(2, '0');
       const minutes = selectedDate.getMinutes().toString().padStart(2, '0');
       const timeString = `${hours}:${minutes}`;
 
-      // store in parent's state
       onTimeChange(slot.id, timeString);
 
-      // If the user has toggled "Remind Me", schedule a local notification
       if (slot.notify) {
-        // If the time is in the past, schedule for next day
         let triggerDate = new Date(selectedDate);
         const now = new Date();
         if (triggerDate <= now) {
@@ -88,11 +81,9 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
     }
   };
 
-  // Toggle the notify switch
   const handleToggleNotify = async (value: boolean) => {
     onToggleNotify(slot.id, value);
     if (value && slot.time) {
-      // If user just toggled on, and there's already a time, schedule now
       const dateObj = getTimeAsDate(slot.time);
       const now = new Date();
       if (dateObj <= now) {
@@ -102,7 +93,6 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
     }
   };
 
-  // Render the dish name, macros, and restaurant info if any
   const renderMenuItem = () => {
     if (!slot.menuItem) {
       return (
@@ -119,7 +109,6 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
         <Text style={[styles.menuItemName, isDark && styles.textLight]}>
           {slot.menuItem.foodName || 'No dish available'}
         </Text>
-        {/* If restaurant */}
         {slot.locationType === 'restaurant' && slot.menuItem.restaurantName ? (
           <View style={styles.restaurantInfo}>
             <MapPin size={16} color={isDark ? '#aaa' : '#666'} />
@@ -155,7 +144,6 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
 
   return (
     <View style={[styles.card, isDark && styles.cardDark]}>
-      {/* Header with meal name and time */}
       <View style={styles.header}>
         <View style={styles.slotInfo}>
           <Text style={[styles.slotName, isDark && styles.textLight]}>
@@ -171,11 +159,8 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
             </Text>
           </TouchableOpacity>
         </View>
-        {/* location type (home or restaurant) toggles in parent's code, 
-            but we show the user's target budget for reference if you like */}
       </View>
 
-      {/* Location toggle row */}
       <View style={[styles.locationToggle, isDark && styles.locationToggleDark]}>
         <TouchableOpacity
           style={[
@@ -235,10 +220,8 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Dish info */}
       {renderMenuItem()}
 
-      {/* Footer with "Remind me" toggle */}
       <View style={styles.footer}>
         <View style={styles.notifyContainer}>
           <Bell size={16} color={isDark ? '#aaa' : '#666'} />
@@ -253,7 +236,6 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
         </View>
       </View>
 
-      {/* Show time picker (Platform-specific) */}
       {showTimePicker && Platform.OS !== 'web' && DateTimePicker && (
         <DateTimePicker
           value={getTimeAsDate(slot.time)}
@@ -263,7 +245,6 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
         />
       )}
 
-      {/* Web time picker fallback */}
       {showTimePicker && Platform.OS === 'web' && (
         <View style={[styles.webTimePickerContainer, isDark && styles.webTimePickerContainerDark]}>
           <TouchableOpacity
@@ -276,10 +257,9 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
             type="time"
             value={slot.time}
             onChange={async (e) => {
-              const val = e.target.value; // "HH:MM"
+              const val = e.target.value;
               onTimeChange(slot.id, val);
               setShowTimePicker(false);
-              // If notify is on, schedule
               if (slot.notify) {
                 let dateObj = getTimeAsDate(val);
                 const now = new Date();
@@ -305,9 +285,6 @@ const MealPlanCard: React.FC<MealPlanCardProps> = ({
   );
 };
 
-//////////////////////////////////////////////////////////////////////////
-// STYLES
-//////////////////////////////////////////////////////////////////////////
 const styles = StyleSheet.create({
   card: {
     backgroundColor: 'white',

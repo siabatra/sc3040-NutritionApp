@@ -1,4 +1,3 @@
-// types/mealPlanner.ts
 import { Timestamp } from 'firebase/firestore';
 
 export interface MenuItem {
@@ -34,7 +33,7 @@ export interface MealSlot {
   budget: number;
   restaurantId?: string;
   restaurantName?: string;
-  estimated?: boolean; // true when nutrition is an AI estimate (home meals)
+  estimated?: boolean;
 }
 
 export interface Restaurant {

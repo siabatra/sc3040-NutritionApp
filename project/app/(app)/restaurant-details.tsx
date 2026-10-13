@@ -1,6 +1,5 @@
-// Restaurant Details Screen (app/(app)/restaurant-details.tsx)
 import React, { useEffect, useState, useContext } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert, Platform, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert, Platform, ScrollView } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
 import { doc, getDoc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
@@ -8,7 +7,7 @@ import { ArrowLeft, Heart, Plus, MapPin, ArrowUpRight, Search, X, Camera, Check 
 import { ThemeContext } from '../../context/ThemeContext';
 import { MapView, Marker, PROVIDER_GOOGLE } from '../../utils/nativeMaps';
 import { fetchNutritionForFood, estimateDishNutrition, type NutritionData } from '../../utils/nutritionApi';
-import { extractMenuFromImage, AiServiceError } from '../../utils/claudeApi';
+import { extractMenuFromImage, AiServiceError } from '../../utils/aiApi';
 import PhotoCaptureModal from '../../components/PhotoCaptureModal';
 
 interface MenuItem {
@@ -22,7 +21,6 @@ interface MenuItem {
   createdAt?: any;
 }
 
-// A dish read from a menu photo, awaiting the user's review before it is saved.
 interface CapturedMenuItem {
   include: boolean;
   foodName: string;
@@ -60,13 +58,11 @@ const RestaurantDetailsScreen: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [addingItem, setAddingItem] = useState<boolean>(false);
 
-  // Menu capture (SRS 7.2.4)
   const [showMenuCamera, setShowMenuCamera] = useState<boolean>(false);
   const [menuCaptureStatus, setMenuCaptureStatus] = useState<string | null>(null);
   const [capturedItems, setCapturedItems] = useState<CapturedMenuItem[] | null>(null);
   const [savingCapturedItems, setSavingCapturedItems] = useState<boolean>(false);
   
-  // Fetch restaurant details and check if it's a favorite
   useEffect(() => {
     const fetchRestaurantDetails = async () => {
       if (!placeId) return;
@@ -74,7 +70,6 @@ const RestaurantDetailsScreen: React.FC = () => {
       setLoading(true);
       
       try {
-        // Check if restaurant is a favorite
         if (auth.currentUser) {
           const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
           if (userDoc.exists() && userDoc.data().favorites) {
@@ -82,7 +77,6 @@ const RestaurantDetailsScreen: React.FC = () => {
           }
         }
         
-        // Fetch restaurant menu items
         await fetchRestaurantItems(placeId as string);
       } catch (error) {
         console.error('Error fetching restaurant details:', error);
@@ -95,7 +89,6 @@ const RestaurantDetailsScreen: React.FC = () => {
     fetchRestaurantDetails();
   }, [placeId]);
   
-  // Filter menu items when search query changes
   useEffect(() => {
     if (!isAddingMode) {
       if (searchQuery.trim() === '') {
@@ -112,7 +105,6 @@ const RestaurantDetailsScreen: React.FC = () => {
   
   const fetchRestaurantItems = async (restaurantId: string) => {
     try {
-      // Check if restaurant document exists
       const restaurantDoc = await getDoc(doc(db, 'restaurants', restaurantId));
       
       if (restaurantDoc.exists() && restaurantDoc.data().items) {
@@ -120,7 +112,6 @@ const RestaurantDetailsScreen: React.FC = () => {
         setMenuItems(items);
         setFilteredMenuItems(items);
       } else {
-        // If no document exists, create one with empty items array
         await setDoc(doc(db, 'restaurants', restaurantId), {
           placeId: restaurantId,
           name: name,
@@ -154,11 +145,9 @@ const RestaurantDetailsScreen: React.FC = () => {
         const favorites = userData.favorites || [];
         
         if (isFavorite) {
-          // Remove from favorites
           const updatedFavorites = favorites.filter((id: string) => id !== placeId);
           await updateDoc(userRef, { favorites: updatedFavorites });
         } else {
-          // Add to favorites
           const updatedFavorites = [...favorites, placeId];
           await updateDoc(userRef, { favorites: updatedFavorites });
         }
@@ -198,7 +187,6 @@ const RestaurantDetailsScreen: React.FC = () => {
     try {
       setAddingItem(true);
       
-      // Get nutrition data for the new item
       const nutritionData = await getNutritionData(searchQuery);
       
       if (!nutritionData) {
@@ -207,7 +195,6 @@ const RestaurantDetailsScreen: React.FC = () => {
         return;
       }
       
-      // Create new item object
       const newItem: MenuItem = {
         id: Date.now().toString(),
         foodName: searchQuery,
@@ -219,27 +206,21 @@ const RestaurantDetailsScreen: React.FC = () => {
         createdAt: new Date(),
       };
       
-      // Update restaurant document in Firestore
       const restaurantRef = doc(db, 'restaurants', placeId as string);
       const restaurantDoc = await getDoc(restaurantRef);
       
       if (restaurantDoc.exists()) {
-        // Create a new items array with the new item added
         const updatedItems = [...(restaurantDoc.data().items || []), newItem];
         
-        // Update the document with the new items array
         await updateDoc(restaurantRef, { items: updatedItems });
         
-        // Update local state
         setMenuItems(updatedItems);
         setFilteredMenuItems(updatedItems);
         
-        // Clear input and show success message
         setSearchQuery('');
         setIsAddingMode(false);
         Alert.alert('Success', 'Food item added to the restaurant menu');
       } else {
-        // Create a new document if it doesn't exist
         await setDoc(restaurantRef, {
           placeId: placeId,
           name: name,
@@ -248,11 +229,9 @@ const RestaurantDetailsScreen: React.FC = () => {
           items: [newItem]
         });
         
-        // Update local state
         setMenuItems([newItem]);
         setFilteredMenuItems([newItem]);
         
-        // Clear input and show success message
         setSearchQuery('');
         setIsAddingMode(false);
         Alert.alert('Success', 'Food item added to the restaurant menu');
@@ -273,7 +252,6 @@ const RestaurantDetailsScreen: React.FC = () => {
 
       setMenuCaptureStatus(`Looking up nutrition for ${items.length} dishes...`);
       const reviewed: CapturedMenuItem[] = [];
-      // Small batches keep USDA FoodData Central requests within its rate limit.
       for (let i = 0; i < items.length; i += 4) {
         const batch = items.slice(i, i + 4);
         const estimates = await Promise.all(
@@ -335,12 +313,10 @@ const RestaurantDetailsScreen: React.FC = () => {
         createdBy: auth.currentUser?.uid || 'anonymous',
         createdAt: new Date(),
         source: 'menu-photo',
-        // Values are estimated from USDA FoodData Central components (or entered by the user).
         nutritionSource: item.nutritionFound ? 'USDA FoodData Central (estimated portion)' : 'user-entered',
         nutritionVerified: false,
       }));
 
-      // arrayUnion avoids overwriting items other users add to the same restaurant at the same time.
       await setDoc(
         doc(db, 'restaurants', placeId as string),
         {
@@ -738,7 +714,7 @@ const styles = StyleSheet.create({
   },
   restaurantDetails: {
     padding: 16,
-    paddingBottom: 90, // Additional padding for the tab bar
+    paddingBottom: 90,
   },
   address: {
     fontSize: 16,
@@ -757,7 +733,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#e1e1e1',
   },
   map: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   webMapPlaceholder: {
     flex: 1,

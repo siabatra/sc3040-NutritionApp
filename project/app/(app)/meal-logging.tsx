@@ -1,4 +1,3 @@
-// Meal Logging Screen (app/(app)/meal-logging.tsx)
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Switch, Platform, Modal, Animated 
@@ -9,10 +8,9 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ArrowLeft, Save, Calendar, Check, Camera, X } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
 import { fetchNutritionForFood } from '../../utils/nutritionApi';
-import { analyzeMealPhoto, AiServiceError } from '../../utils/claudeApi';
+import { analyzeMealPhoto, AiServiceError } from '../../utils/aiApi';
 import PhotoCaptureModal from '../../components/PhotoCaptureModal';
 
-// A food detected in a meal photo, with string fields so the user can edit them.
 interface PhotoFoodItem {
   name: string;
   servingDescription: string;
@@ -28,7 +26,6 @@ const MACRO_KEYS = ['calories', 'protein', 'carbs', 'fat'] as const;
 
 const isValidAmount = (value: string) => value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= 0;
 
-// For web platform compatibility, provide a DateTimePicker alternative
 const DateTimePickerWeb = ({ value, onChange, mode }: any) => {
   const { theme } = useContext(ThemeContext);
   const isDark = theme === 'dark';
@@ -43,7 +40,6 @@ const DateTimePickerWeb = ({ value, onChange, mode }: any) => {
       <TouchableOpacity
         style={[styles.webDatePickerButton, isDark && styles.webDatePickerButtonDark]}
         onPress={() => {
-          // Increment by 30 minutes as a simple alternative
           const newDate = new Date(value.getTime());
           newDate.setMinutes(newDate.getMinutes() + 30);
           onChange({ type: 'set', nativeEvent: { timestamp: newDate.getTime() } }, newDate);
@@ -60,7 +56,6 @@ const MealLoggingScreen: React.FC = () => {
   const { theme } = useContext(ThemeContext);
   const isDark = theme === 'dark';
   
-  // Initialize states with params or defaults
   const [foodName, setFoodName] = useState(params.foodName as string || '');
   const [calories, setCalories] = useState(params.calories as string || '0');
   const [protein, setProtein] = useState(params.protein as string || '0');
@@ -74,12 +69,10 @@ const MealLoggingScreen: React.FC = () => {
   const [fetchingNutrition, setFetchingNutrition] = useState(false);
   const [mealType, setMealType] = useState(params.mealType as string || '');
 
-  // Photo logging (SRS 7.3.2)
   const [showCamera, setShowCamera] = useState(false);
   const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
   const [photoItems, setPhotoItems] = useState<PhotoFoodItem[] | null>(null);
   
-  // State for success modal
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const checkScale = useRef(new Animated.Value(0)).current;
   const modalOpacity = useRef(new Animated.Value(0)).current;
@@ -90,11 +83,9 @@ const MealLoggingScreen: React.FC = () => {
   const restaurantLng = params.longitude ? parseFloat(params.longitude as string) : null;
   const restaurantAddress = params.address as string;
   
-  // Lazy-load the DateTimePicker component only on native platforms
   let DateTimePicker: any;
   if (Platform.OS !== 'web') {
     try {
-      // Dynamic import of native components
       DateTimePicker = require('@react-native-community/datetimepicker').default;
     } catch (error) {
       console.error('Failed to load DateTimePicker:', error);
@@ -106,9 +97,7 @@ const MealLoggingScreen: React.FC = () => {
   const currentFoodName = useRef(foodName);
   currentFoodName.current = foodName;
 
-  // Fetch nutrition data when food name changes (if not from a restaurant)
   useEffect(() => {
-    // Photo results already carry nutrition values; don't overwrite them with a lookup.
     if (photoItems) return;
     if (!restaurantId && foodName.trim().length > 2) {
       const debounceTimer = setTimeout(() => {
@@ -142,7 +131,6 @@ const MealLoggingScreen: React.FC = () => {
     }
   };
   
-  // Copy the (possibly corrected) photo items into the meal form.
   const applyPhotoItems = (items: PhotoFoodItem[]) => {
     setFoodName(items.map((item) => item.name).filter(Boolean).join(', '));
     for (const key of MACRO_KEYS) {
@@ -267,7 +255,6 @@ const MealLoggingScreen: React.FC = () => {
     try {
       const userId = auth.currentUser!.uid;
       
-      // Prepare location data
       let locationData = null;
       
       if (isCustomLocation) {
@@ -285,7 +272,6 @@ const MealLoggingScreen: React.FC = () => {
         };
       }
       
-      // Create meal log document
       await addDoc(collection(db, 'mealLogs'), {
         userId,
         foodName,
@@ -298,7 +284,6 @@ const MealLoggingScreen: React.FC = () => {
         location: locationData,
         mealType: mealType || null,
         source: photoItems ? 'photo' : 'manual',
-        // Detected foods as reviewed and corrected by the user (AI estimates, not verified).
         ...(photoItems && {
           items: photoItems.map((item) => ({
             name: item.name.trim(),
@@ -314,18 +299,14 @@ const MealLoggingScreen: React.FC = () => {
         }),
       });
 
-      // Show success modal with improved animations
       setShowSuccessModal(true);
       
-      // Start the animations
       Animated.sequence([
-        // Fade in the modal overlay
         Animated.timing(modalOpacity, {
           toValue: 1,
           duration: 300,
           useNativeDriver: true,
         }),
-        // Pop and bounce effect for the check icon
         Animated.spring(checkScale, {
           toValue: 1,
           friction: 5,
@@ -334,9 +315,7 @@ const MealLoggingScreen: React.FC = () => {
         })
       ]).start();
       
-      // Keep the modal visible for a bit then navigate away
       setTimeout(() => {
-        // Fade out animation before hiding
         Animated.timing(modalOpacity, {
           toValue: 0,
           duration: 300,
@@ -724,7 +703,6 @@ const MealLoggingScreen: React.FC = () => {
         onConfirm={handlePhotoConfirmed}
       />
 
-      {/* Success Modal */}
       <Modal
         visible={showSuccessModal}
         transparent
@@ -789,7 +767,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 16,
-    paddingBottom: 90, // Add extra padding for tab bar
+    paddingBottom: 90,
   },
   contentContainerDark: {
     backgroundColor: '#121212',
@@ -1020,7 +998,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
   },
-  // Photo logging styles
   photoButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1112,7 +1089,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     paddingVertical: 4,
   },
-  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

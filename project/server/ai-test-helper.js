@@ -5,16 +5,20 @@ const path = require('node:path');
 const Module = require('node:module');
 const ts = require('typescript');
 
-const source = fs.readFileSync(path.join(__dirname, '../utils/claudeApi.ts'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../utils/aiApi.ts'), 'utf8');
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
 }).outputText;
 
 function loadClient(user = { getIdToken: async () => 'test-token' }) {
-  const moduleInstance = new Module(path.join(__dirname, '../utils/claudeApi.ts'), module);
-  moduleInstance.filename = path.join(__dirname, '../utils/claudeApi.ts');
+  const moduleInstance = new Module(path.join(__dirname, '../utils/aiApi.ts'), module);
+  moduleInstance.filename = path.join(__dirname, '../utils/aiApi.ts');
   moduleInstance.paths = module.paths;
-  moduleInstance.require = (id) => id === '../firebaseConfig' ? { auth: { currentUser: user } } : require(id);
+  const stubs = {
+    '../firebaseConfig': { auth: { currentUser: user } },
+    './serverUrl': { localServerUrl: (override) => override },
+  };
+  moduleInstance.require = (id) => stubs[id] ?? require(id);
   moduleInstance._compile(compiled, moduleInstance.filename);
   return moduleInstance.exports;
 }

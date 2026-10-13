@@ -8,18 +8,14 @@ if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
   throw new Error('Set EMAIL_USER and EMAIL_PASS in project/.env');
 }
 
-// At the top of server.js
 const express = require('express');
 const nodemailer = require('nodemailer');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const admin = require('firebase-admin'); // Import Firebase Admin SDK
+const admin = require('firebase-admin');
 
-// --- Initialize Firebase Admin SDK ---
-// Load service account key from file (RECOMMENDED: use env vars for path)
-// **Make sure 'serviceAccountKey.json' is in your .gitignore!**
 try {
-    const serviceAccount = require('./serviceAccountKey.json'); // Adjust path if needed
+    const serviceAccount = require('./serviceAccountKey.json');
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
     });
@@ -32,68 +28,51 @@ try {
     console.error("!!! Is it added to .gitignore?                         !!!");
     console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     console.error("Admin SDK Init Error:", error);
-    process.exit(1); // Exit if Admin SDK fails to load - critical for password reset
+    process.exit(1);
 }
-// --- End Admin SDK Init ---
-
 
 const app = express();
 const port = 4000;
 
-// --- Middleware ---
 app.use(cors());
-// Claude API routes (menu capture, meal photo logging, meal planning).
-// Mounted before bodyParser.json() because they use a larger body limit for images.
-app.use('/ai', require('./claude').router);
+app.use('/ai', require('./ai').router);
 app.use(bodyParser.json());
 
-// --- In-Memory OTP Store ---
 const otpStore = {};
 const OTP_EXPIRY_MINUTES = 5;
 
-// --- Nodemailer Setup ---
-// Email credentials are loaded from project/.env.
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER, // Replace or use env var
-    pass: process.env.EMAIL_PASS, // Replace with YOUR App Password or use env var
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
 
-// --- Helper Function: Generate OTP ---
 function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// --- API Endpoints ---
-
-// Endpoint to send OTP (No changes needed here, but ensure 'purpose' is handled if necessary)
 app.post('/send-otp', async (req, res) => {
-  const { email, purpose } = req.body; // Purpose might be 'signup' or 'reset'
+  const { email, purpose } = req.body;
 
   if (!email) { return res.status(400).json({ success: false, message: 'Email is required' }); }
   if (!/\S+@\S+\.\S+/.test(email)) { return res.status(400).json({ success: false, message: 'Invalid email format' }); }
 
-  // Check if user exists in Firebase *before* sending reset OTP (Optional but good)
   if (purpose === 'reset') {
      try {
          await admin.auth().getUserByEmail(email);
          console.log(`User ${email} found, proceeding with password reset OTP.`);
      } catch (userNotFoundError) {
-         // Check the error code specifically for user-not-found
          if (userNotFoundError.code === 'auth/user-not-found') {
              console.log(`Password reset request for non-existent user: ${email}`);
-             // Still send success to avoid revealing which emails are registered
              return res.json({ success: true, message: 'If your email is registered, you will receive a code.' });
          } else {
-             // Log other potential errors during user lookup
              console.error(`Error checking user ${email} for password reset:`, userNotFoundError);
              return res.status(500).json({ success: false, message: 'Error checking user account.' });
          }
      }
   }
-
 
   const otp = generateOTP();
   const expiryTime = Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000;
@@ -123,7 +102,6 @@ app.post('/send-otp', async (req, res) => {
   }
 });
 
-// Endpoint to verify OTP (No changes needed unless you add purpose validation)
 app.post('/verify-otp', (req, res) => {
   const { email, otp } = req.body;
 
@@ -135,12 +113,6 @@ app.post('/verify-otp', (req, res) => {
   if (Date.now() > storedData.expires) { delete otpStore[email]; return res.status(400).json({ success: false, message: 'OTP has expired. Please request again.' }); }
 
   if (storedData.otp === otp) {
-    // IMPORTANT: Do *not* delete the OTP immediately for password reset flow.
-    // If you delete it here, you can't implicitly trust the next step.
-    // A better flow would generate a *different* short-lived token here.
-    // For this simplified (less secure) flow, we'll leave the OTP for now
-    // or just proceed, acknowledging the risk. Let's delete it for simplicity
-    // but understand this weakens the link between OTP verify and password set.
     delete otpStore[email]; 
     console.log(`OTP verified successfully for ${email}`);
     res.json({ success: true, message: 'OTP verified successfully' });
@@ -149,8 +121,6 @@ app.post('/verify-otp', (req, res) => {
   }
 });
 
-
-// --- NEW Endpoint: Reset Password ---
 app.post('/reset-password', async (req, res) => {
     const { email, newPassword } = req.body;
 
@@ -158,7 +128,6 @@ app.post('/reset-password', async (req, res) => {
         return res.status(400).json({ success: false, message: 'Email and new password are required.' });
     }
 
-    // Add basic password complexity check if needed (e.g., length)
     if (newPassword.length < 6) {
          return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
     }
@@ -166,18 +135,14 @@ app.post('/reset-password', async (req, res) => {
     console.log(`Attempting password reset for ${email}`);
 
     try {
-        // Find the user by email using Admin SDK
         const userRecord = await admin.auth().getUserByEmail(email);
         const uid = userRecord.uid;
 
-        // Update the user's password using Admin SDK
         await admin.auth().updateUser(uid, {
             password: newPassword,
         });
 
         console.log(`Password successfully updated for user: ${uid} (${email})`);
-        // Optionally: Invalidate existing refresh tokens for security
-        // await admin.auth().revokeRefreshTokens(uid);
 
         res.json({ success: true, message: 'Password updated successfully.' });
 
@@ -190,12 +155,14 @@ app.post('/reset-password', async (req, res) => {
          }
     }
 });
-// --- End New Endpoint ---
 
-// --- Cleanup expired OTPs periodically ---
-setInterval(() => { /* ... keep as is ... */ }, 60 * 1000 * 5);
+setInterval(() => {
+  const now = Date.now();
+  for (const email of Object.keys(otpStore)) {
+    if (now > otpStore[email].expires) delete otpStore[email];
+  }
+}, 60 * 1000 * 5);
 
-// --- Start Server ---
 app.listen(port, () => {
   console.log(`OTP server listening at http://localhost:${port}`);
 });

@@ -59,14 +59,8 @@ export interface DishNutritionEstimate {
   unmatchedComponents: string[];
 }
 
-// Typical hawker / food-court plate when the portion is unknown.
 const DEFAULT_PORTION_GRAMS = 350;
 
-/**
- * Estimate a dish's nutrition from its constituent foods. USDA values are per 100 g,
- * so the portion is split evenly across components and each is scaled to its share.
- * Returns null when no component matches a USDA record.
- */
 export const estimateDishNutrition = async (
   components: string[],
   portionGrams: number | null

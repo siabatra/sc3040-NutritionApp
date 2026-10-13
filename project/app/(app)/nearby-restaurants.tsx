@@ -1,4 +1,3 @@
-// NearbyRestaurantsScreen (app/(app)/nearby-restaurants.tsx)
 import React, { useEffect, useState, useRef, useContext } from 'react';
 import { 
   View, 
@@ -24,7 +23,7 @@ interface Restaurant {
   place_id: string;
   name: string;
   vicinity: string;
-  formatted_address?: string; // Added for text search results
+  formatted_address?: string;
   geometry: {
     location: {
       lat: number;
@@ -43,6 +42,23 @@ interface Region {
   longitudeDelta: number;
 }
 
+const DEFAULT_REGION: Region = {
+  latitude: 1.3521,
+  longitude: 103.8198,
+  latitudeDelta: 0.0922,
+  longitudeDelta: 0.0421,
+};
+const LOCATION_TIMEOUT_MS = 10000;
+
+async function getUserPosition() {
+  const lastKnown = await Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 });
+  if (lastKnown) return lastKnown;
+  return Promise.race([
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out getting location')), LOCATION_TIMEOUT_MS)),
+  ]);
+}
+
 const NearbyRestaurantsScreen: React.FC = () => {
   const { theme } = useContext(ThemeContext);
   const isDark = theme === 'dark';
@@ -54,12 +70,12 @@ const NearbyRestaurantsScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [favorites, setFavorites] = useState<string[]>([]);
-  const [mapRegion, setMapRegion] = useState<Region | null>(null);
+  const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_REGION);
+  const [locating, setLocating] = useState(true);
   const mapRef = useRef<any>(null);
-  const [apiKey, setApiKey] = useState(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY);
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
   const [locationPermissionBlocked, setLocationPermissionBlocked] = useState(false);
   
-  // Mock data for testing in case API fails
   const mockRestaurants: Restaurant[] = [
     {
       place_id: 'mock1',
@@ -99,27 +115,14 @@ const NearbyRestaurantsScreen: React.FC = () => {
     }
   ];
   
-  // Get user location and nearby restaurants
   useEffect(() => {
     (async () => {
       try {
-        // First check if location permission is already denied
         const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
         if (foregroundStatus === 'denied') {
           setLocationPermissionBlocked(true);
           setErrorMsg('Location permission is denied. Please enable location services in your device settings.');
           
-          // Use Singapore as default location
-          const defaultRegion = {
-            latitude: 1.3521,
-            longitude: 103.8198,
-            latitudeDelta: 0.0922,
-            longitudeDelta: 0.0421,
-          };
-          
-          setMapRegion(defaultRegion);
-          
-          // Use mock data
           const restaurantsWithFavorites = mockRestaurants.map((restaurant) => ({
             ...restaurant,
             isFavorite: favorites.includes(restaurant.place_id)
@@ -135,15 +138,7 @@ const NearbyRestaurantsScreen: React.FC = () => {
         if (status !== 'granted') {
           setErrorMsg('Permission to access location was denied');
           setLoading(false);
-          // Use a default location (e.g. Singapore)
-          setMapRegion({
-            latitude: 1.3521,
-            longitude: 103.8198,
-            latitudeDelta: 0.0922,
-            longitudeDelta: 0.0421,
-          });
-          
-          // Use mock data
+
           const restaurantsWithFavorites = mockRestaurants.map((restaurant) => ({
             ...restaurant,
             isFavorite: favorites.includes(restaurant.place_id)
@@ -155,10 +150,7 @@ const NearbyRestaurantsScreen: React.FC = () => {
         }
 
         try {
-          let location = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          console.log("Got location:", location.coords);
+          let location = await getUserPosition();
           setLocation(location);
           
           const region = {
@@ -169,11 +161,11 @@ const NearbyRestaurantsScreen: React.FC = () => {
           };
           
           setMapRegion(region);
-          
-          // Fetch nearby restaurants
+          mapRef.current?.animateToRegion(region, 500);
+          setLocating(false);
+
           await fetchNearbyRestaurants(location.coords.latitude, location.coords.longitude);
           
-          // Fetch user favorites
           if (auth.currentUser) {
             const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
             if (userDoc.exists() && userDoc.data().favorites) {
@@ -184,7 +176,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
           console.error('Error getting location or restaurants:', error);
           setErrorMsg('Could not fetch locations. Please try again later.');
           
-          // Use mock data
           const restaurantsWithFavorites = mockRestaurants.map((restaurant) => ({
             ...restaurant,
             isFavorite: favorites.includes(restaurant.place_id)
@@ -200,7 +191,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
         setErrorMsg('Error accessing location permissions');
         setLoading(false);
         
-        // Use mock data
         const restaurantsWithFavorites = mockRestaurants.map((restaurant) => ({
           ...restaurant,
           isFavorite: favorites.includes(restaurant.place_id)
@@ -209,10 +199,9 @@ const NearbyRestaurantsScreen: React.FC = () => {
         setRestaurants(restaurantsWithFavorites);
         setFilteredRestaurants(restaurantsWithFavorites);
       }
-    })();
+    })().finally(() => setLocating(false));
   }, []);
   
-  // Update filtered restaurants when search query changes
   useEffect(() => {
     if (searchQuery.trim() === '') {
       setFilteredRestaurants(restaurants);
@@ -226,7 +215,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
     }
   }, [searchQuery, restaurants]);
 
-  // Update restaurant favorite status when favorites change
   useEffect(() => {
     const updatedRestaurants = restaurants.map(restaurant => ({
       ...restaurant,
@@ -238,30 +226,21 @@ const NearbyRestaurantsScreen: React.FC = () => {
 
   const fetchNearbyRestaurants = async (latitude: number, longitude: number) => {
     try {
-      console.log(`Fetching restaurants at: ${latitude},${longitude}`);
       const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=1500&type=restaurant&key=${apiKey}`;
       
-      console.log("API URL:", url);
       const response = await fetch(url);
       const data = await response.json();
-      
-      console.log("API Response status:", data.status);
-      console.log("API Response has results:", !!data.results);
-      
+
       if (data.status === 'OK' && data.results && data.results.length > 0) {
-        // Add isFavorite property based on user's favorites
         const restaurantsWithFavorites = data.results.map((restaurant: Restaurant) => ({
           ...restaurant,
           isFavorite: favorites.includes(restaurant.place_id)
         }));
         
-        console.log(`Found ${restaurantsWithFavorites.length} restaurants`);
         setRestaurants(restaurantsWithFavorites);
         setFilteredRestaurants(restaurantsWithFavorites);
       } else if (data.status === 'ZERO_RESULTS') {
-        console.log("No restaurants found nearby");
         setErrorMsg('No restaurants found in this area. Try a different location.');
-        // Use mock data since API returned no results
         const restaurantsWithFavorites = mockRestaurants.map((restaurant) => ({
           ...restaurant,
           isFavorite: favorites.includes(restaurant.place_id)
@@ -273,7 +252,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
         console.error("API error status:", data.status);
         setErrorMsg(`Error fetching restaurants: ${data.status}. Using sample data instead.`);
         
-        // Use mock data
         const restaurantsWithFavorites = mockRestaurants.map((restaurant) => ({
           ...restaurant,
           isFavorite: favorites.includes(restaurant.place_id)
@@ -286,7 +264,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
       console.error('Error fetching nearby restaurants:', error);
       setErrorMsg('Failed to fetch restaurants. Using sample data instead.');
       
-      // Use mock data
       const restaurantsWithFavorites = mockRestaurants.map((restaurant) => ({
         ...restaurant,
         isFavorite: favorites.includes(restaurant.place_id)
@@ -304,28 +281,20 @@ const NearbyRestaurantsScreen: React.FC = () => {
     setErrorMsg(null);
     
     try {
-      // If we don't have location, use a default one
-      const lat = location?.coords.latitude || 1.3521; // Singapore coordinates as default
+      const lat = location?.coords.latitude || 1.3521;
       const lng = location?.coords.longitude || 103.8198;
       
-      console.log(`Searching for "${searchQuery}" at: ${lat},${lng}`);
       const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=restaurant+${encodeURIComponent(searchQuery)}&location=${lat},${lng}&radius=5000&key=${apiKey}`;
       
-      console.log("Search API URL:", url);
       const response = await fetch(url);
       const data = await response.json();
-      
-      console.log("Search API Response status:", data.status);
-      
+
       if (data.status === 'OK' && data.results && data.results.length > 0) {
-        // Process each result to ensure it has a vicinity/address
         const processedResults = data.results.map((restaurant: any) => {
-          // Text search uses formatted_address instead of vicinity, make sure we have a consistent property
           if (!restaurant.vicinity && restaurant.formatted_address) {
             restaurant.vicinity = restaurant.formatted_address;
           }
           
-          // If somehow both are missing, add a placeholder
           if (!restaurant.vicinity && !restaurant.formatted_address) {
             restaurant.vicinity = "Address not available";
           }
@@ -336,7 +305,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
           };
         });
         
-        console.log(`Found ${processedResults.length} restaurants for search`);
         setRestaurants(processedResults);
         setFilteredRestaurants(processedResults);
       } else if (data.status === 'ZERO_RESULTS') {
@@ -346,7 +314,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
         console.error("Search API error:", data.status);
         setErrorMsg(`Search failed (${data.status}). Using sample data instead.`);
         
-        // Filter mock data based on search
         const lowercaseQuery = searchQuery.toLowerCase();
         const filteredMock = mockRestaurants.filter(
           restaurant => restaurant.name.toLowerCase().includes(lowercaseQuery)
@@ -362,7 +329,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
       console.error('Error searching restaurants:', error);
       setErrorMsg('Search failed. Please try again.');
       
-      // Filter mock data based on search
       const lowercaseQuery = searchQuery.toLowerCase();
       const filteredMock = mockRestaurants.filter(
         restaurant => restaurant.name.toLowerCase().includes(lowercaseQuery)
@@ -397,13 +363,11 @@ const NearbyRestaurantsScreen: React.FC = () => {
     
     try {
       if (restaurant.isFavorite) {
-        // Remove from favorites
         await updateDoc(userRef, {
           favorites: arrayRemove(restaurant.place_id)
         });
         setFavorites(favorites.filter(id => id !== restaurant.place_id));
       } else {
-        // Add to favorites
         await updateDoc(userRef, {
           favorites: arrayUnion(restaurant.place_id)
         });
@@ -480,7 +444,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
     </TouchableOpacity>
   );
 
-  // Render the content that updates based on loading, errors, etc.
   const renderContent = () => {
     if (loading) {
       return (
@@ -531,7 +494,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
                 setErrorMsg(null);
                 fetchNearbyRestaurants(location.coords.latitude, location.coords.longitude);
               } else {
-                // Use mock data
                 setFilteredRestaurants(
                   mockRestaurants.map(r => ({...r, isFavorite: false}))
                 );
@@ -545,7 +507,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
       );
     }
     
-    // Render list of restaurant items if available
     return (
       <View style={styles.listContainer}>
         {filteredRestaurants.length > 0 ? (
@@ -559,7 +520,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
     );
   };
 
-  // Render map component
   const renderMap = () => {
     if (Platform.OS === 'web') {
       return (
@@ -570,16 +530,15 @@ const NearbyRestaurantsScreen: React.FC = () => {
       );
     }
     
-    if (!mapRegion) return null;
-    
     return (
+      <>
       <MapView
         ref={mapRef}
         style={styles.map}
         initialRegion={mapRegion}
+        onMapReady={() => mapRef.current?.animateToRegion(mapRegion, 0)}
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
       >
-        {/* User's location marker */}
         {location && (
           <Marker
             coordinate={{
@@ -591,7 +550,6 @@ const NearbyRestaurantsScreen: React.FC = () => {
           />
         )}
         
-        {/* Restaurant markers */}
         {filteredRestaurants.map((restaurant) => (
           <Marker
             key={restaurant.place_id}
@@ -605,6 +563,13 @@ const NearbyRestaurantsScreen: React.FC = () => {
           />
         ))}
       </MapView>
+      {locating && (
+        <View style={[styles.locatingBadge, isDark && styles.locatingBadgeDark]} pointerEvents="none">
+          <ActivityIndicator size="small" color="#2ecc71" />
+          <Text style={[styles.locatingText, isDark && styles.textLight]}>Finding your location...</Text>
+        </View>
+      )}
+      </>
     );
   };
 
@@ -763,7 +728,26 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   map: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
+  },
+  locatingBadge: {
+    position: 'absolute',
+    top: 8,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+  },
+  locatingBadgeDark: {
+    backgroundColor: 'rgba(30, 30, 30, 0.95)',
+  },
+  locatingText: {
+    marginLeft: 8,
+    fontSize: 13,
+    color: '#333',
   },
   webMapPlaceholder: {
     flex: 1,

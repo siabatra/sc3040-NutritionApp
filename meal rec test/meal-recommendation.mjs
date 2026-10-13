@@ -8,15 +8,11 @@ try {
 }
 if (!process.env.DEEPSEEK_API_KEY) throw new Error("Set DEEPSEEK_API_KEY in meal rec test/.env");
 
-// meal-recommendation.mjs
 import OpenAI from "openai";
 import readline from "readline";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, getDocs } from "firebase/firestore";
 
-// --------------------
-// 1. Firebase config
-// --------------------
 const firebaseConfig = {
   apiKey: process.env.FIREBASE_API_KEY,
   authDomain: process.env.FIREBASE_AUTH_DOMAIN,
@@ -30,18 +26,11 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// --------------------
-// 2. OpenAI (DeepSeek) init
-// --------------------
 const openai = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY, // your DeepSeek key
+  apiKey: process.env.DEEPSEEK_API_KEY,
   baseURL: "https://api.deepseek.com"
 });
 
-// --------------------
-// 3. Meal Times
-// --------------------
-// You can edit these to test different ranges.
 const mealTimes = [
   { name: "breakfast", start: "08:00", end: "10:00" },
   { name: "lunch",     start: "12:00", end: "14:00" },
@@ -49,20 +38,9 @@ const mealTimes = [
   { name: "dinner",    start: "18:00", end: "20:00" }
 ];
 
-/**
- * If DeepSeek decides to add an extra snack, it should schedule it
- * at a time that makes sense after dinner or between meals.
- */
-
-// --------------------
-// 4. Location (for distance calc)
-// --------------------
 const LATITUDE = 1.355049655134308;
 const LONGITUDE = 103.68518139204353;
 
-// --------------------
-// 5. CLI Setup
-// --------------------
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
@@ -72,12 +50,9 @@ function ask(q) {
   return new Promise((res) => rl.question(q, res));
 }
 
-// --------------------
-// 6. Distance Calculation
-// --------------------
 function getDistance(lat1, lon1, lat2, lon2) {
   const toRad = (deg) => deg * (Math.PI / 180);
-  const R = 6371; // radius of Earth in km
+  const R = 6371;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a =
@@ -89,16 +64,12 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-// --------------------
-// 7. Fetch Nearby Menu Items from Firestore
-// --------------------
 async function fetchNearbyMenuItems() {
   const snapshot = await getDocs(collection(db, "restaurants"));
   const nearbyItems = [];
 
   snapshot.forEach((doc) => {
     const data = doc.data();
-    // Check distance within 2km
     if (data.location) {
       const dist = getDistance(
         data.location.lat,
@@ -108,7 +79,6 @@ async function fetchNearbyMenuItems() {
       );
       if (dist < 2.0 && data.items) {
         for (const item of data.items) {
-          // Attach restaurant name AND address
           nearbyItems.push({
             ...item,
             restaurantName: data.name,
@@ -122,18 +92,12 @@ async function fetchNearbyMenuItems() {
   return nearbyItems;
 }
 
-// --------------------
-// 8. Generate Meal Plan with DeepSeek
-// --------------------
 async function generateMealPlan(mealSettings, caloriesLeft, dietaryPreferences, feedback = "") {
-  // Get possible items
   const menuItems = await fetchNearbyMenuItems();
 
-  // Build a list of items for each meal (restaurant vs. home)
   const availableByMeal = {};
   for (const [meal, setting] of Object.entries(mealSettings)) {
     if (setting === "restaurant") {
-      // Present only items from Firestore
       const items = menuItems.map(
         (i) =>
           `${i.foodName} (${i.calories} kcal) from ${i.restaurantName} [Address: ${i.restaurantAddress}]`
@@ -142,30 +106,19 @@ async function generateMealPlan(mealSettings, caloriesLeft, dietaryPreferences, 
         ? items.join("\n")
         : "No dishes found";
     } else {
-      // "home" => user can cook or create anything
       availableByMeal[meal] = "User will cook at home. You can invent any realistic dish.";
     }
   }
 
-  // Combine dietary preferences
   const dietLabels = dietaryPreferences.length
     ? dietaryPreferences.join(", ")
     : "None";
 
-  // We also provide the meal times and instructions for extra snack
   const timeInstructions = mealTimes
     .map(
       (t) => `- ${t.name}: ${t.start} - ${t.end}`
     )
     .join("\n");
-
-  /**
-   * We tell DeepSeek:
-   * 1. Use only the provided calorie counts from the data.
-   * 2. If an extra snack is needed, schedule it after dinner or a healthy gap.
-   * 3. Include the restaurant address if using restaurant items.
-   * 4. Return results with the new "Time Range" field as well.
-   */
 
   const messages = [
     {
@@ -212,7 +165,6 @@ ${Object.entries(availableByMeal)
     }
   ];
 
-  // Request completion from DeepSeek
   const completion = await openai.chat.completions.create({
     model: "deepseek-chat",
     messages
@@ -222,16 +174,11 @@ ${Object.entries(availableByMeal)
   return completion.choices[0].message.content;
 }
 
-// --------------------
-// 9. Main Interaction
-// --------------------
 async function main() {
-  // 1) Ask user for total calories
   const totalCalories = parseInt(
     await ask("How many calories do you have remaining today? ")
   );
 
-  // 2) Ask for meal settings (home/restaurant) for the 4 guaranteed meals
   const mealSettings = {};
   for (const t of mealTimes) {
     const setting = await ask(
@@ -240,7 +187,6 @@ async function main() {
     mealSettings[t.name] = setting.toLowerCase() === "restaurant" ? "restaurant" : "home";
   }
 
-  // 3) Ask for dietary preferences
   const prefInput = await ask(
     `Choose your dietary preferences (comma-separated numbers):
 0: vegetarian
@@ -266,26 +212,21 @@ async function main() {
     .map((i) => dietOptions[parseInt(i, 10)])
     .filter(Boolean);
 
-  // 4) Generate the initial plan
   let plan = await generateMealPlan(mealSettings, totalCalories, dietaryPrefs);
 
-  // 5) Loop: ask user if they want to regenerate or swap
   while (true) {
     const action = await ask(
       "\n🔁 Do you want to [1] Regenerate full plan, [2] Swap one meal, or [Enter] to exit? "
     );
     if (action === "1") {
-      // Regenerate full plan
       const reason = await ask("Why do you want to regenerate the plan? (optional input): ");
       plan = await generateMealPlan(mealSettings, totalCalories, dietaryPrefs, reason);
     } else if (action === "2") {
-      // Swap one meal
       const swapMeal = await ask(
         "Which meal do you want to swap? (breakfast/lunch/snack/dinner): "
       );
       const reason = await ask("Any comments on why you're swapping " + swapMeal + "? (optional): ");
 
-      // Build the user prompt for that single meal swap
       const mealItems = mealSettings[swapMeal] === "restaurant"
         ? (await fetchNearbyMenuItems())
           .map(
@@ -338,7 +279,6 @@ Only return this format:
 
       console.log(`\n✅ Swapped meal:\n${result.choices[0].message.content}`);
     } else {
-      // Exit
       rl.close();
       break;
     }

@@ -1,4 +1,3 @@
-// Meal History Screen (app/(app)/meal-history.tsx)
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { 
   View, 
@@ -15,8 +14,8 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
-import { collection, query, where, orderBy, getDocs, doc, updateDoc, Timestamp } from 'firebase/firestore';
-import { ArrowLeft, Trash2, CreditCard as Edit, X, Calendar, Filter, ChartBar as BarChart3, Map as MapIcon, List, ChevronDown } from 'lucide-react-native';
+import { collection, query, where, orderBy, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { ArrowLeft, Trash2, CreditCard as Edit, X, Filter, ChartBar as BarChart3, Map as MapIcon, List } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
 import { deleteMealLog } from '../../utils/mealPlanPersistence';
 import { normaliseMealType } from '../../functions/lib/reporting';
@@ -82,14 +81,12 @@ const MealHistoryScreen: React.FC = () => {
     if (mealHistory.length > 0) {
       applyFilters();
       
-      // Set map region based on meal locations
       if (Platform.OS !== 'web' && MapView && !mapRegion) {
         const locationsWithCoordinates = mealHistory.filter(
           meal => meal.location?.coordinates?.lat && meal.location?.coordinates?.lng
         );
         
         if (locationsWithCoordinates.length > 0) {
-          // Use the first location with coordinates as center
           const firstLocation = locationsWithCoordinates[0];
           setMapRegion({
             latitude: firstLocation.location!.coordinates!.lat,
@@ -113,7 +110,6 @@ const MealHistoryScreen: React.FC = () => {
     setError(null);
 
     try {
-      // Create a base query for the user's meal logs
       let mealsQuery = query(
         collection(db, 'mealLogs'),
         where('userId', '==', auth.currentUser.uid),
@@ -125,7 +121,6 @@ const MealHistoryScreen: React.FC = () => {
       const meals: MealLog[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
-        // Convert Firestore timestamp to JS Date
         const mealDate = data.date?.toDate ? data.date.toDate() : new Date(data.date);
 
         const meal: MealLog = {
@@ -156,20 +151,16 @@ const MealHistoryScreen: React.FC = () => {
   const applyFilters = () => {
     let filtered = [...mealHistory];
     
-    // Apply date range filter
     if (filters.dateRange !== 'all') {
       const now = new Date();
       let startDate: Date;
 
       if (filters.dateRange === 'today') {
-        // Start of today
         startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       } else if (filters.dateRange === 'week') {
-        // Start of the week (7 days ago)
         startDate = new Date(now);
         startDate.setDate(startDate.getDate() - 7);
       } else if (filters.dateRange === 'month') {
-        // Start of the month (30 days ago)
         startDate = new Date(now);
         startDate.setDate(startDate.getDate() - 30);
       }
@@ -177,12 +168,10 @@ const MealHistoryScreen: React.FC = () => {
       filtered = filtered.filter(meal => meal.date >= startDate);
     }
     
-    // Apply meal type filter
     if (filters.mealType) {
       filtered = filtered.filter(meal => meal.mealType === filters.mealType);
     }
     
-    // Apply location filter
     if (filters.locationFilter !== 'all') {
       filtered = filtered.filter(meal => 
         filters.locationFilter === 'restaurant' ? 
@@ -208,7 +197,6 @@ const MealHistoryScreen: React.FC = () => {
               setLoading(true);
               if (!auth.currentUser) throw new Error('Please sign in again.');
               await deleteMealLog(auth.currentUser.uid, mealId);
-              // Update state after deletion
               setMealHistory(mealHistory.filter(meal => meal.id !== mealId));
               Alert.alert('Success', 'Meal deleted successfully');
             } catch (error) {
@@ -257,7 +245,6 @@ const MealHistoryScreen: React.FC = () => {
         fat: Number(editedFat) || 0,
       });
 
-      // Update state after edit
       setMealHistory(mealHistory.map(meal => 
         meal.id === editMealId ? {
           ...meal,
@@ -525,7 +512,6 @@ const MealHistoryScreen: React.FC = () => {
       );
     }
     
-    // Filter for meals with location data
     const mealsWithLocation = filteredMeals.filter(
       meal => meal.location?.coordinates?.lat && meal.location?.coordinates?.lng
     );
@@ -1229,7 +1215,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   map: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   webMapPlaceholder: {
     flex: 1,

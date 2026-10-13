@@ -1,4 +1,3 @@
-//(app)/(auth)/forgot-password.tsx
 import React, { useState } from 'react';
 import { 
   View, 
@@ -6,16 +5,15 @@ import {
   TextInput, 
   TouchableOpacity, 
   StyleSheet, 
-  ActivityIndicator, // Added
-  Alert             // Added
+  ActivityIndicator,
+  Alert
 } from 'react-native';
 import { router } from 'expo-router';
 import globalStyles from '../styles/globalStyles';
-import axios from 'axios'; // Added
+import axios from 'axios';
+import { localServerUrl } from '../../utils/serverUrl';
 
-// --- Server URL ---
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL; // Use your actual server URL
-// ---
+const SERVER_URL = localServerUrl(process.env.EXPO_PUBLIC_SERVER_URL, 4000);
 
 const ForgotPasswordScreen: React.FC = () => {
   const [email, setEmail] = useState<string>('');
@@ -50,7 +48,6 @@ const ForgotPasswordScreen: React.FC = () => {
       setIsError(true);
       return;
     }
-    // Basic email format check
      if (!/\S+@\S+\.\S+/.test(email)) {
        setStatusMessage('Please enter a valid email format.');
        setIsError(true);
@@ -62,23 +59,19 @@ const ForgotPasswordScreen: React.FC = () => {
     setIsError(false);
 
     try {
-      // Call your server to send OTP for password reset
       const response = await axios.post(`${SERVER_URL}/send-otp`, {
         email: email,
-        purpose: 'reset' // Crucial: Indicate the purpose
+        purpose: 'reset'
       });
 
       if (response.data.success) {
-        console.log('Password reset OTP request successful');
         setStatusMessage('Verification code sent. Please check your email.');
         setIsError(false);
-        // Navigate to OTP screen, passing email and purpose
         router.push({
           pathname: '/(auth)/otp-verification',
           params: { email: email, purpose: 'reset' } 
         });
       } else {
-        // Handle server-side errors (e.g., email not found, send failure)
         const serverMsg = response.data.message || 'Failed to send verification code.';
         setStatusMessage(serverMsg);
         setIsError(true);
@@ -118,7 +111,7 @@ const ForgotPasswordScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   successText: {
-    color: '#2ecc71', // Green for success
+    color: '#2ecc71',
     marginVertical: 8,
     textAlign: 'center',
     fontWeight: '500',

@@ -1,9 +1,7 @@
-// app/(app)/styles/_layout.tsx
-
-import { useEffect, useState, useContext } from 'react';
+import { useContext } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet, TouchableOpacity, Text, Platform } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { router, usePathname } from 'expo-router';
 import { Search, Plus, ChartPie as PieChart, Clock, Settings } from 'lucide-react-native';
 import { ThemeProvider } from '../context/ThemeContext';
@@ -14,10 +12,6 @@ function TabBar() {
   const isDark = theme === 'dark';
   const pathname = usePathname();
 
-  // Debug log to see the actual pathname
-  console.log('Current pathname:', pathname);
-
-  // Decide if a tab is "active"
   const isActive = (route: string) => {
     if (route === 'dashboard' && pathname === '/(app)/dashboard') return true;
     if (route === 'search' && pathname === '/(app)/nearby-restaurants') return true;
@@ -26,7 +20,6 @@ function TabBar() {
     return false;
   };
 
-  // Navigation helper
   const navigateTo = (route: string) => {
     switch (route) {
       case 'dashboard':
@@ -47,7 +40,6 @@ function TabBar() {
     }
   };
 
-  // Hide tab bar on auth routes
   if (
     pathname === '/' ||
     pathname.startsWith('/login') ||
@@ -150,7 +142,6 @@ export default function RootLayout() {
   );
 }
 
-// Styles
 const styles = StyleSheet.create({
   tabBar: {
     position: 'absolute',

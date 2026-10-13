@@ -1,13 +1,11 @@
-//(auth)/otp-verification.tsx
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import globalStyles from '../styles/globalStyles';
 import axios from 'axios';
+import { localServerUrl } from '../../utils/serverUrl';
 
-// --- Server URL ---
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL; // Use your actual server URL
-// ---
+const SERVER_URL = localServerUrl(process.env.EXPO_PUBLIC_SERVER_URL, 4000);
 
 const OTPVerificationScreen: React.FC = () => {
   const [otpCode, setOtpCode] = useState<string>('');
@@ -15,14 +13,12 @@ const OTPVerificationScreen: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [resendLoading, setResendLoading] = useState<boolean>(false);
 
-  // Get parameters passed from previous screen
   const { email, purpose } = useLocalSearchParams<{ email: string; purpose: string }>();
 
   useEffect(() => {
-    // Validate required parameters
     if (!email || !purpose) {
       Alert.alert("Error", "Required information (email or purpose) missing. Please start the process again.", [
-        { text: "OK", onPress: () => router.replace('/(auth)/') } // Go back to login/signup choice
+        { text: "OK", onPress: () => router.replace('/(auth)/') }
       ]);
       setVerificationStatus('Error: Missing required parameters.');
     } else if (purpose !== 'signup' && purpose !== 'reset') {
@@ -40,7 +36,6 @@ const OTPVerificationScreen: React.FC = () => {
   const getButtonText = () => {
       return purpose === 'reset' ? 'Verify for Reset' : 'Verify Account';
   }
-
 
   const doDisplayOTPInputFields = () => (
     <>
@@ -81,24 +76,18 @@ const OTPVerificationScreen: React.FC = () => {
       const response = await axios.post(`${SERVER_URL}/verify-otp`, {
         email: email,
         otp: otpCode,
-        // Optionally send purpose if server needs it for different validation logic
-        // purpose: purpose 
       });
 
       if (response.data.success) {
-        console.log(`OTP verified successfully for purpose: ${purpose}`);
         
-        // Navigate based on the purpose
         if (purpose === 'signup') {
             router.replace('/(auth)/account-created'); 
         } else if (purpose === 'reset') {
-            // Navigate to password reset screen, passing the verified email
             router.replace({
                pathname: '/(auth)/password-reset',
                params: { email: email } 
             });
         } else {
-             // Should not happen due to useEffect check, but handle defensively
              setVerificationStatus('Error: Unknown purpose after verification.');
         }
 
@@ -123,10 +112,9 @@ const OTPVerificationScreen: React.FC = () => {
     setVerificationStatus('');
 
     try {
-        // Send the correct purpose to the server
         const response = await axios.post(`${SERVER_URL}/send-otp`, {
           email: email,
-          purpose: purpose // Pass the original purpose ('signup' or 'reset')
+          purpose: purpose
         });
 
         if (response.data.success) {
@@ -146,7 +134,6 @@ const OTPVerificationScreen: React.FC = () => {
       }
   };
 
-
   return (
     <View style={globalStyles.container}>
       {doDisplayOTPInputFields()}
@@ -158,7 +145,7 @@ const OTPVerificationScreen: React.FC = () => {
         {loading ? (
            <ActivityIndicator size="small" color="#ffffff" />
         ) : (
-          <Text style={globalStyles.buttonText}>{getButtonText()}</Text> // Dynamic button text
+          <Text style={globalStyles.buttonText}>{getButtonText()}</Text>
         )}
       </TouchableOpacity>
       <TouchableOpacity onPress={handleResendOtp} disabled={resendLoading || loading}>
@@ -166,7 +153,6 @@ const OTPVerificationScreen: React.FC = () => {
            {resendLoading ? 'Sending...' : 'Resend Code'}
         </Text>
       </TouchableOpacity>
-       {/* Optional: Add a back button if needed, maybe depends on purpose */}
        {purpose === 'reset' && (
             <TouchableOpacity onPress={() => router.back()} disabled={loading || resendLoading}>
                 <Text style={[globalStyles.link, styles.backLink, (resendLoading || loading) && styles.linkDisabled]}>
@@ -201,7 +187,7 @@ const styles = StyleSheet.create({
       color: '#aaaaaa',
   },
    backLink: {
-      marginTop: 15, // Add space above back link
+      marginTop: 15,
    }
 });
 

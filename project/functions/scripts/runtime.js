@@ -1,7 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
-const { initializeApp, applicationDefault } = require('firebase-admin/app');
+const { initializeApp, applicationDefault, cert } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { readAll, rebuildUser } = require('../lib/rollup-store');
 
@@ -16,13 +16,28 @@ function initialiseBackend() {
   }
   const projectId = process.env.GCLOUD_PROJECT || process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID;
   if (!projectId) throw new Error('Set GCLOUD_PROJECT to the intended Firebase project.');
-  // Local development only. Never bundle Admin credentials in the application.
-  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && !process.env.FIRESTORE_EMULATOR_HOST) {
-    const keys = fs.readdirSync(projectRoot).filter((name) => name.includes('-firebase-adminsdk-') && name.endsWith('.json'));
-    if (keys.length === 1) process.env.GOOGLE_APPLICATION_CREDENTIALS = path.join(projectRoot, keys[0]);
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    initializeApp({ projectId, credential: applicationDefault() });
+    return getFirestore();
   }
-  initializeApp({ projectId, credential: applicationDefault() });
+  const keyPath = findServiceAccountKey(projectRoot);
+  if (!keyPath) {
+    throw new Error('No Firebase Admin key found. Place it at project/server/serviceAccountKey.json or set GOOGLE_APPLICATION_CREDENTIALS.');
+  }
+  const key = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
+  if (key.project_id && key.project_id !== projectId) {
+    throw new Error(`${path.basename(keyPath)} belongs to Firebase project "${key.project_id}", but the app uses "${projectId}".`);
+  }
+  initializeApp({ projectId, credential: cert(key) });
   return getFirestore();
+}
+
+function findServiceAccountKey(projectRoot) {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return path.resolve(projectRoot, process.env.GOOGLE_APPLICATION_CREDENTIALS);
+  const keys = fs.readdirSync(projectRoot).filter((name) => name.includes('-firebase-adminsdk-') && name.endsWith('.json'));
+  if (keys.length === 1) return path.join(projectRoot, keys[0]);
+  const serverKey = path.join(projectRoot, 'server/serviceAccountKey.json');
+  return fs.existsSync(serverKey) ? serverKey : null;
 }
 
 async function generateSummaries(db, uid) {
@@ -31,7 +46,6 @@ async function generateSummaries(db, uid) {
   const asOf = new Date();
   let completed = 0;
   for (const user of users) {
-    // No deployed dirty triggers are needed for this explicit local maintenance job.
     await rebuildUser(db, user.id, asOf, { forceHistorical: true });
     completed++;
   }

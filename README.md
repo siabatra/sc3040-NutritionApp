@@ -14,7 +14,7 @@ The mobile app is in the `project` folder. The project also includes a small Exp
 - Nearby restaurant search using Google Maps/Places
 - Restaurant details, favorites, directions, and user-added menu items
 - Nutrition lookup for food items using USDA FoodData Central
-- AI meal plan generation, menu extraction and meal-photo recognition with the Claude API (via the server)
+- AI meal plan generation, menu extraction and meal-photo recognition with an AI API (via the server)
 - Light/dark theme support
 
 ## Tech Stack
@@ -29,7 +29,7 @@ The mobile app is in the `project` folder. The project also includes a small Exp
 - Nodemailer
 - Google Maps / Places / Directions APIs
 - USDA FoodData Central API
-- Claude API (Anthropic SDK)
+- Anthropic SDK
 
 ## Project Structure
 
@@ -82,13 +82,13 @@ The service account must belong to the Firebase project configured in `project/.
 5. In a second terminal at the repository root, run `cd project`, then `npx expo start --clear`. Scan the QR code with compatible Expo Go, or press `w` for web.
 6. Optional: in a separate terminal at the repository root, run `cd "meal rec test"`, `npm install`, then `node meal-recommendation.mjs`.
 
-Only the private files above need separate sharing; source code and blank `.env.example` templates come from GitHub. Share secrets through a private channel, never in GitHub issues or public chat. These files are ignored by Git; do not use `git add -f` to include them.
+Only the private files above need separate sharing; source code and blank `.env.example` templates come from the repository. Share secrets through a private channel, never in issues or public chat. These files are ignored by Git; do not use `git add -f` to include them.
 
 ### Single-file private handoff
 
 The project owner has a local `GROUP-SETUP.private.md` at the repository root. It contains the actual contents of the three setup files above, their exact destination paths, and startup commands. It is ignored by Git and will not appear in a clone. Request it privately from the owner, then copy each fenced code block into the path stated above it; do not copy the Markdown headings or code fences into the destination files.
 
-This handoff contains API credentials, the email password, and a Firebase Admin private key. Share it only with trusted group members who need those credentials. Do not commit it, paste it in a GitHub issue, or upload it publicly. It excludes unused `HISTORICAL_*` credentials, duplicate service account files, and the original Git backup. It is a snapshot: after rotating credentials, update both the private source files and the handoff before sharing it again.
+This handoff contains API credentials, the email password, and a Firebase Admin private key. Share it only with trusted group members who need those credentials. Do not commit it, paste it in an issue, or upload it publicly. It excludes unused `HISTORICAL_*` credentials and duplicate service account files. It is a snapshot: after rotating credentials, update both the private source files and the handoff before sharing it again.
 
 The setup below also describes configuration for anyone creating their own Firebase project.
 
@@ -181,9 +181,9 @@ Set these variables in `project/.env`:
 - `EXPO_PUBLIC_USDA_API_KEY`: USDA FoodData Central API key used by the nutrition utility.
 - `EXPO_PUBLIC_SERVER_URL`: email server address.
 - `EMAIL_USER` and `EMAIL_PASS`: server-only email credentials; never add an `EXPO_PUBLIC_` prefix.
-- `ANTHROPIC_API_KEY`: server-only Claude API key used by `server/claude.js`; never add an `EXPO_PUBLIC_` prefix.
+- `ANTHROPIC_API_KEY`: server-only AI API key used by `server/ai.js`; never add an `EXPO_PUBLIC_` prefix.
 
-The server exposes `POST /ai/meal-plan`, `POST /ai/extract-menu` and `POST /ai/analyze-meal-photo`. Each requires the signed-in user's Firebase ID token; the app calls them through `utils/claudeApi.ts`. The server must be running for Plan My Day to work.
+The server exposes `POST /ai/meal-plan`, `POST /ai/extract-menu` and `POST /ai/analyze-meal-photo`. Each requires the signed-in user's Firebase ID token; the app calls them through `utils/aiApi.ts`. The server must be running for Plan My Day to work.
 
 The standalone `meal rec test/meal-recommendation.mjs` uses its own `meal rec test/.env` (copy its `.env.example`). It has a different Firebase project configuration. Run `npm install` in that directory and then `node meal-recommendation.mjs`; the script loads the adjacent `.env` regardless of your working directory.
 
@@ -257,7 +257,7 @@ Runs Expo linting.
 
 Remote push notification support from `expo-notifications` is not available in Expo Go for newer SDK versions. Use a development build if notification functionality is required.
 
-## Before Pushing To GitHub
+## Before Pushing
 
 Check that no private keys or API secrets are committed:
 
@@ -269,17 +269,12 @@ Check that no private keys or API secrets are committed:
 
 If any secret was committed or shared, rotate it in the provider dashboard before making the repository public.
 
-
-## Private Files and Existing Git History
+## Private Files
 
 Share `project/.env` and, if needed, `meal rec test/.env` through a private channel. The server also needs `project/server/serviceAccountKey.json`, shared separately and kept private. Other local Firebase Admin JSON copies must remain private too.
 
 Do not push `.env` variants, service account JSON, email passwords, signing keys, credentials in `.npmrc`, logs containing emails or verification codes, or generated builds containing keys. The root `.gitignore` covers these common paths. Never include real user health records, locations, or account exports in fixtures or screenshots you publish.
 
-Credential values have been removed from the Git history prepared for publishing, while preserving the original commit messages and other code changes. Previously committed credentials must still be revoked or rotated. Any `HISTORICAL_*` entries in your private `project/.env` are retained only for reference and are not used by the app; do not reuse them.
-
-The original history is backed up locally in `.private-git-backup/original-history.bundle`. This backup contains the original secrets. The entire `.private-git-backup/` directory is ignored: never upload it to GitHub or share it with the group.
-
-`meal rec test/node_modules` and root `.expo` files were already tracked before these ignore rules. Ignore rules do not untrack existing files; omit these generated directories from a fresh repository.
+Any credentials that were ever committed or shared must be revoked or rotated. Any `HISTORICAL_*` entries in your private `project/.env` are retained only for reference and are not used by the app; do not reuse them.
 
 The email server's existing `/reset-password` endpoint accepts an email and new password without requiring proof of OTP verification. This is separate from the configuration changes and must be fixed before exposing that server publicly.

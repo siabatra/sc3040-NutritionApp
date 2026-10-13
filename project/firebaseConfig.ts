@@ -1,4 +1,3 @@
-// firebaseConfig.ts
 import 'react-native-url-polyfill/auto';
 import { Platform } from 'react-native';
 import { initializeApp } from 'firebase/app';
@@ -23,7 +22,6 @@ const firebaseConfig = {
   measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
-// Explicit local-only mode for testing without reading or writing production data.
 const useEmulators = __DEV__ && process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATORS === 'true';
 const app = initializeApp(useEmulators ? {
   apiKey: 'demo-api-key', projectId: 'demo-mealcare-analytics',

@@ -1,39 +1,22 @@
-// Claude API proxy for MealCare (SRS 7.2.4 Capture Menu, 7.3.2 Log Meal by Photo,
-// 7.4.1 Generate AI Daily Meal Plan, 7.4.3 Regenerate Meal Plan).
-//
-// The Anthropic API key stays server-side. Every route requires a valid
-// Firebase ID token, and every AI response is schema-validated before it is
-// returned to the app.
-
 const express = require('express');
 const admin = require('firebase-admin');
 const Anthropic = require('@anthropic-ai/sdk');
 const { zodOutputFormat } = require('@anthropic-ai/sdk/helpers/zod');
 const z = require('zod/v4');
 
-// =====================================================================
-// ANTHROPIC API KEY
-// Put your key in project/.env as:
-//   ANTHROPIC_API_KEY=sk-ant-...
-// Never prefix it with EXPO_PUBLIC_ (that would ship it inside the app).
-// =====================================================================
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 
-const CLAUDE_MODEL = 'claude-opus-5-5';
-// Low effort keeps responses inside the SRS latency targets (10 s for plans, 15 s for photo logging).
-const CLAUDE_EFFORT = 'low';
-// If a safety classifier declines a request, the API retries it on a fallback model server-side.
+const AI_MODEL = 'claude-opus-5-5';
+const AI_EFFORT = 'low';
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // Claude API per-image limit
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 const client = ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: ANTHROPIC_API_KEY, timeout: 30 * 1000, maxRetries: 1 })
   : null;
 
-// Thrown for any failure the app should show to the user. `code` lets the app
-// pick a fallback, e.g. offer manual logging on AI_UNAVAILABLE.
 class AiRouteError extends Error {
   constructor(status, code, message) {
     super(message);
@@ -41,10 +24,6 @@ class AiRouteError extends Error {
     this.code = code;
   }
 }
-
-// ---------------------------------------------------------------------
-// Output schemas (what Claude must return)
-// ---------------------------------------------------------------------
 
 const MenuExtractionSchema = z.object({
   legible: z.boolean().describe('false if the photo is too blurry, dark, or cropped to read the menu'),
@@ -97,10 +76,6 @@ const MealPlanSchema = z.object({
   notes: z.string().nullable(),
 });
 
-// ---------------------------------------------------------------------
-// Request schemas (what the app must send)
-// ---------------------------------------------------------------------
-
 const ImageRequestSchema = z.object({
   imageBase64: z.string().min(1),
   mediaType: z.enum(ALLOWED_MEDIA_TYPES),
@@ -120,8 +95,6 @@ const MealPlanRequestSchema = z.object({
       locationType: z.enum(['home', 'restaurant']),
     }),
   ).min(1).max(8),
-  // Dishes already filtered by the app for proximity and dietary rules, each
-  // with stored nutrition (SRS 7.4.1: only stored menu items may be recommended).
   candidates: z.array(
     z.object({
       id: z.string(),
@@ -132,15 +105,10 @@ const MealPlanRequestSchema = z.object({
       restaurantAddress: z.string().optional(),
     }),
   ).max(200).default([]),
-  // For regeneration: the plan the user wants something different from.
   previousPlan: z.array(z.object({ slotId: z.string(), dishName: z.string() })).optional(),
 });
 
-// ---------------------------------------------------------------------
-// Claude call helpers
-// ---------------------------------------------------------------------
-
-async function callClaude({ system, content, schema }) {
+async function callModel({ system, content, schema }) {
   if (!client) {
     throw new AiRouteError(503, 'AI_NOT_CONFIGURED', 'AI features are not configured on the server.');
   }
@@ -148,11 +116,11 @@ async function callClaude({ system, content, schema }) {
   let response;
   try {
     response = await client.beta.messages.create({
-      model: CLAUDE_MODEL,
+      model: AI_MODEL,
       max_tokens: 16000,
       betas: [FALLBACK_BETA],
       fallbacks: 'default',
-      output_config: { effort: CLAUDE_EFFORT, format: zodOutputFormat(schema) },
+      output_config: { effort: AI_EFFORT, format: zodOutputFormat(schema) },
       system,
       messages: [{ role: 'user', content }],
     });
@@ -161,27 +129,24 @@ async function callClaude({ system, content, schema }) {
       throw new AiRouteError(429, 'AI_BUSY', 'The AI service is busy right now. Please try again in a moment.');
     }
     if (error instanceof Anthropic.BadRequestError) {
-      console.error('Claude rejected the request:', error.message);
+      console.error('AI model rejected the request:', error.message);
       throw new AiRouteError(400, 'AI_BAD_REQUEST', 'The AI service could not process this request.');
     }
     if (error instanceof Anthropic.APIError) {
-      // Covers auth errors, 5xx, timeouts and connection failures.
-      console.error(`Claude API error ${error.status ?? ''}:`, error.message);
+      console.error(`AI API error ${error.status ?? ''}:`, error.message);
       throw new AiRouteError(503, 'AI_UNAVAILABLE', 'The AI service is temporarily unavailable.');
     }
     throw error;
   }
 
-  // Check why Claude stopped before reading the content.
   if (response.stop_reason === 'refusal') {
-    console.warn('Claude declined request:', response.stop_details);
+    console.warn('AI model declined request:', response.stop_details);
     throw new AiRouteError(422, 'AI_REFUSED', 'The AI could not help with this request.');
   }
   if (response.stop_reason === 'max_tokens') {
     throw new AiRouteError(502, 'AI_INVALID_RESPONSE', 'The AI returned an incomplete result. Please try again.');
   }
 
-  // Validate against the schema so unvalidated AI output never reaches the app.
   const text = response.content.find((block) => block.type === 'text')?.text;
   let parsed;
   try {
@@ -190,7 +155,7 @@ async function callClaude({ system, content, schema }) {
     parsed = { success: false, error: new Error('Response was not valid JSON') };
   }
   if (!parsed.success) {
-    console.error('Invalid structured output from Claude:', parsed.error.message);
+    console.error('Invalid structured output from AI model:', parsed.error.message);
     throw new AiRouteError(502, 'AI_INVALID_RESPONSE', 'The AI returned an invalid result. Please try again.');
   }
   return parsed.data;
@@ -214,13 +179,8 @@ function parseRequest(schema, body) {
 
 const round = (n) => Math.round(n * 10) / 10;
 
-// ---------------------------------------------------------------------
-// Feature functions
-// ---------------------------------------------------------------------
-
-// SRS 7.2.4 – Capture Restaurant Menu
 async function extractMenu(image) {
-  const result = await callClaude({
+  const result = await callModel({
     system:
       'You read photographs of restaurant, hawker-stall and food-court menus in Singapore. ' +
       'Extract every dish that is legibly written. Do not invent dishes that are not on the menu. ' +
@@ -235,13 +195,11 @@ async function extractMenu(image) {
   if (result.items.length === 0) {
     throw new AiRouteError(422, 'NO_ITEMS_FOUND', 'No dishes were found on this menu. Please retake the photo.');
   }
-  // Nutrition is filled in afterwards from USDA FoodData Central; nothing here is verified yet.
   return { items: result.items.map((item) => ({ ...item, verified: false })) };
 }
 
-// SRS 7.3.2 – Log Meal by Photo
 async function analyzeMealPhoto(image) {
-  const result = await callClaude({
+  const result = await callModel({
     system:
       'You identify foods in meal photographs, including Singaporean hawker dishes, and estimate portion sizes ' +
       'and nutrition. List each distinct food separately. Use the plate, bowl or utensils for scale. ' +
@@ -253,7 +211,6 @@ async function analyzeMealPhoto(image) {
   if (!result.identified || result.foods.length === 0) {
     throw new AiRouteError(422, 'FOOD_NOT_IDENTIFIED', 'No food could be identified. You can log this meal manually.');
   }
-  // AI values are estimates until the user reviews them and USDA data corroborates them.
   const foods = result.foods.map((food) => ({ ...food, verified: false }));
   const totals = foods.reduce(
     (t, f) => ({ calories: t.calories + f.calories, protein: t.protein + f.protein, carbs: t.carbs + f.carbs, fat: t.fat + f.fat }),
@@ -262,7 +219,6 @@ async function analyzeMealPhoto(image) {
   return { foods, totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, round(v)])) };
 }
 
-// SRS 7.4.1 / 7.4.3 – Generate or Regenerate AI Daily Meal Plan
 async function generateMealPlan(req) {
   const restaurantSlots = req.slots.filter((s) => s.locationType === 'restaurant');
   if (restaurantSlots.length > 0 && req.candidates.length === 0) {
@@ -290,7 +246,7 @@ async function generateMealPlan(req) {
     'Keep the total calories of all meals at or below the remaining budget.',
   ].filter((line) => line !== null).join('\n');
 
-  const result = await callClaude({
+  const result = await callModel({
     system:
       'You are the meal-planning assistant in MealCare, a nutrition app for users in Singapore. ' +
       'You build a daily plan that fits the user\'s calorie budget and dietary restrictions. ' +
@@ -299,7 +255,6 @@ async function generateMealPlan(req) {
     schema: MealPlanSchema,
   });
 
-  // Validate the structure and totals before the plan reaches the app (SRS 7.4.1).
   const slotIds = new Set(req.slots.map((s) => s.id));
   const seen = new Set();
   const meals = result.meals.map((meal) => {
@@ -314,7 +269,6 @@ async function generateMealPlan(req) {
       if (!candidate) {
         throw new AiRouteError(502, 'AI_INVALID_RESPONSE', 'The AI recommended a dish that is not on a stored menu.');
       }
-      // Stored menu values are authoritative.
       return {
         slotId: meal.slotId,
         source: 'restaurant',
@@ -355,7 +309,6 @@ async function generateMealPlan(req) {
     (t, m) => ({ calories: t.calories + m.calories, protein: t.protein + m.protein, carbs: t.carbs + m.carbs, fat: t.fat + m.fat }),
     { calories: 0, protein: 0, carbs: 0, fat: 0 },
   );
-  // Allow a 5% margin for home-meal estimates.
   if (totals.calories > req.remainingCalories * 1.05) {
     throw new AiRouteError(502, 'AI_INVALID_RESPONSE', 'The generated plan exceeds your calorie budget. Please try again.');
   }
@@ -367,11 +320,6 @@ async function generateMealPlan(req) {
   };
 }
 
-// ---------------------------------------------------------------------
-// Express router
-// ---------------------------------------------------------------------
-
-// Rejects requests without a valid Firebase ID token (SRS 6.4).
 async function requireFirebaseAuth(req, res, next) {
   const match = /^Bearer (.+)$/.exec(req.headers.authorization || '');
   if (!match) {
@@ -401,7 +349,6 @@ function handler(fn) {
 }
 
 const router = express.Router();
-// Images arrive as base64, so these routes need a larger body limit than the global parser.
 router.use(express.json({ limit: '8mb' }));
 router.use(requireFirebaseAuth);
 

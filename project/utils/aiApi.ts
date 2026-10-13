@@ -1,9 +1,7 @@
-// Client for the Claude API proxy in server/claude.js.
-// The app never holds the Anthropic key; it sends the user's Firebase ID token
-// and the server calls Claude on its behalf.
 import { auth } from '../firebaseConfig';
+import { localServerUrl } from './serverUrl';
 
-const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
+const SERVER_URL = localServerUrl(process.env.EXPO_PUBLIC_SERVER_URL, 4000);
 
 export type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
 
@@ -14,17 +12,15 @@ export interface Macros {
   fat: number;
 }
 
-// --- Capture Menu (SRS 7.2.4) ---
 export interface ExtractedMenuItem {
   name: string;
   description: string | null;
   price: number | null;
-  components: string[]; // constituent foods to look up in USDA FoodData Central
+  components: string[];
   estimatedPortionGrams: number | null;
   verified: false;
 }
 
-// --- Log Meal by Photo (SRS 7.3.2) ---
 export interface DetectedFood extends Macros {
   name: string;
   servingDescription: string;
@@ -34,7 +30,6 @@ export interface DetectedFood extends Macros {
   verified: false;
 }
 
-// --- AI Meal Plan (SRS 7.4.1 / 7.4.3) ---
 export interface PlanSlotInput {
   id: string;
   name: string;
@@ -58,7 +53,7 @@ export interface MealPlanRequest {
   feedback?: string;
   slots: PlanSlotInput[];
   candidates: PlanCandidate[];
-  previousPlan?: { slotId: string; dishName: string }[]; // set when regenerating
+  previousPlan?: { slotId: string; dishName: string }[];
 }
 
 export interface PlannedMeal extends Macros {
@@ -68,7 +63,7 @@ export interface PlannedMeal extends Macros {
   dishName: string;
   portion: string;
   reason: string;
-  estimated: boolean; // true for home meals, whose nutrition is an AI estimate
+  estimated: boolean;
   restaurantId?: string;
   restaurantName?: string;
   restaurantAddress?: string | null;
@@ -103,7 +98,6 @@ export class AiServiceError extends Error {
     this.name = 'AiServiceError';
   }
 
-  /** True when the user should be offered manual entry instead (SRS 7.3.2 / 7.3.3). */
   get shouldOfferManualEntry() {
     return ['AI_NOT_CONFIGURED', 'AI_BUSY', 'AI_UNAVAILABLE', 'FOOD_NOT_IDENTIFIED', 'NETWORK'].includes(this.code);
   }
@@ -134,17 +128,11 @@ async function postToAi<T>(path: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-/**
- * Extract dishes from a photographed menu.
- * `imageBase64` can come from expo-camera: takePictureAsync({ base64: true, quality: 0.5 }).
- */
 export const extractMenuFromImage = (imageBase64: string, mediaType: ImageMediaType = 'image/jpeg') =>
   postToAi<{ items: ExtractedMenuItem[] }>('/extract-menu', { imageBase64, mediaType });
 
-/** Identify foods, portions and estimated nutrition in a meal photo. */
 export const analyzeMealPhoto = (imageBase64: string, mediaType: ImageMediaType = 'image/jpeg') =>
   postToAi<{ foods: DetectedFood[]; totals: Macros }>('/analyze-meal-photo', { imageBase64, mediaType });
 
-/** Generate a daily meal plan. Pass `previousPlan` to regenerate a different one. */
 export const generateAiMealPlan = (request: MealPlanRequest) =>
   postToAi<MealPlanResult>('/meal-plan', request);

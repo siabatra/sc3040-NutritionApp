@@ -52,7 +52,6 @@ function previousPeriod(period, direction) {
 }
 
 function dayBounds(key) {
-  // Singapore has a fixed UTC+08:00 offset and no daylight saving time.
   return { start: new Date(`${key}T00:00:00+08:00`), end: new Date(`${shiftDate(key, 1)}T00:00:00+08:00`) };
 }
 

@@ -11,14 +11,22 @@ function queue(uid) {
   job.dirty = true;
   if (!job.running) { clearTimeout(job.timer); job.timer = setTimeout(() => run(uid, job), 400); }
 }
-async function run(uid, job) {
+function run(uid, job) {
   if (stopping || job.running) return;
   job.running = true; job.dirty = false;
+  job.promise = refresh(uid, job);
+}
+async function refresh(uid, job) {
+  let retryDelay = 1500;
   try { await rebuildUser(db, uid, new Date(), { forceHistorical: true }); console.log('Analytics refreshed after a data change.'); }
-  catch (error) { console.error(`Analytics refresh failed: ${error.message}`); job.dirty = true; }
+  catch (error) {
+    job.dirty = true;
+    if (error.code === 'analytics/busy') retryDelay = 30000;
+    else console.error(`Analytics refresh failed: ${error.message}`);
+  }
   finally {
     job.running = false;
-    if (!stopping && job.dirty) job.timer = setTimeout(() => run(uid, job), 1500);
+    if (!stopping && job.dirty) job.timer = setTimeout(() => run(uid, job), retryDelay);
     else jobs.delete(uid);
   }
 }
@@ -48,9 +56,18 @@ const repair = setInterval(async () => {
   catch (error) { watchError(error); }
 }, 60000);
 console.log('Live analytics worker watching meal logs and saved plans.');
-async function stop() {
-  stopping = true; clearInterval(repair); stops.forEach((unsubscribe) => unsubscribe());
-  for (const job of jobs.values()) clearTimeout(job.timer);
-  await db.terminate();
+let stopped;
+function stop() {
+  stopped ||= (async () => {
+    stopping = true; clearInterval(repair); stops.forEach((unsubscribe) => unsubscribe());
+    for (const job of jobs.values()) clearTimeout(job.timer);
+    const running = [...jobs.values()].filter((job) => job.running).map((job) => job.promise);
+    if (running.length) {
+      console.log('Analytics worker finishing the current refresh before exiting...');
+      await Promise.race([Promise.allSettled(running), new Promise((resolve) => setTimeout(resolve, 20000).unref())]);
+    }
+    await db.terminate();
+  })();
+  return stopped;
 }
 process.once('SIGINT', stop); process.once('SIGTERM', stop);

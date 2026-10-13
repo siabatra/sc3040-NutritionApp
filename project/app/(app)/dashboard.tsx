@@ -1,4 +1,3 @@
-// DashboardScreen.tsx
 import React, { useEffect, useState, useContext } from 'react';
 import { 
   View, 
@@ -14,7 +13,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../../firebaseConfig';
 import { doc, collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
-import { Search, Plus, ChartPie as PieChart, Clock, Settings, Map, UtensilsCrossed, ChartBar as BarChart3, CalendarClock, Check } from 'lucide-react-native';
+import { Settings, Map, UtensilsCrossed, ChartBar as BarChart3, CalendarClock, Check } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
 import { dateKey, dayBounds } from '../../functions/lib/reporting';
 import { logDailyPlanMeal } from '../../utils/mealPlanPersistence';
@@ -58,7 +57,6 @@ const DashboardScreen: React.FC = () => {
   const [isCarbsExceeded, setIsCarbsExceeded] = useState<boolean>(false);
   const [isFatExceeded, setIsFatExceeded] = useState<boolean>(false);
   
-  // TODAY’S PLAN STATES:
   const [todaysPlan, setTodaysPlan] = useState<MealPlanSlot[]>([]);
   const [planCreated, setPlanCreated] = useState<boolean>(false);
   
@@ -103,7 +101,6 @@ const DashboardScreen: React.FC = () => {
     return () => { clearInterval(timer); stops.forEach((stop) => stop()); };
   }, [uid]));
 
-  // Log a planned meal.
   const logPlannedMeal = async (slot: MealPlanSlot) => {
     if (!auth.currentUser || !slot.menuItem) return;
     
@@ -270,7 +267,6 @@ const DashboardScreen: React.FC = () => {
     return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
   };
 
-  // Updated render function for today’s plan with enhanced completed UI.
   const renderTodaysPlan = () => {
     if (!planCreated) {
       return (
@@ -304,7 +300,6 @@ const DashboardScreen: React.FC = () => {
       );
     }
     
-    // If every slot is completed, show a dedicated, enhanced UI.
     const allCompleted = todaysPlan.every(slot => Boolean(slot.loggedMealId) || !slot.menuItem);
     if (allCompleted) {
       return (
@@ -977,7 +972,6 @@ const styles = StyleSheet.create({
     color: '#2ecc71',
     marginLeft: 6,
   },
-  // New style for full-day completed UI
   completedPlanContainer: {
     alignItems: 'center',
     justifyContent: 'center',

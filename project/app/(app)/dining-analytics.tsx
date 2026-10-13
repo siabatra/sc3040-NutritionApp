@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useState } from 'react';
+import { useCallback, useContext, useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -86,8 +86,6 @@ export default function DiningAnalyticsScreen() {
     labelColor: (opacity = 1) => dark ? `rgba(240, 240, 240, ${opacity})` : `rgba(50, 50, 50, ${opacity})`,
     decimalPlaces: metric === 'calories' ? 0 : 1,
     propsForDots: { r: '3' },
-    // Chart kit supplies SVG origins even for unrotated labels; its web adapter
-    // emits an unsupported DOM attribute under React 19. Native origins remain intact.
     propsForLabels: { fontSize: 10, ...(Platform.OS === 'web' ? { origin: undefined } : {}) },
   };
 

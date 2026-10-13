@@ -17,7 +17,6 @@ export function adjacentAnalyticsPeriod(period: AnalyticsPeriod, direction: numb
   if (period.type !== '3months') {
     return analyticsPeriodFor(direction < 0 ? shiftDate(period.startDate, -1) : period.endDate, period.type);
   }
-  // Anchor a multi-month window at its last month, moving by a whole window.
   const anchor = new Date(`${shiftDate(period.endDate, -1)}T00:00:00Z`);
   anchor.setUTCDate(1);
   anchor.setUTCMonth(anchor.getUTCMonth() + (direction < 0 ? -1 : 1) * (period.type === '3months' ? 3 : 12));
@@ -85,7 +84,6 @@ export async function fetchAnalyticsRollup(uid: string, period: AnalyticsPeriod)
     updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : null,
   } as AnalyticsRollup;
 }
-
 
 export function subscribeAnalyticsRollup(uid: string, period: AnalyticsPeriod,
   onChange: (summary: AnalyticsRollup | null) => void, onError: (error: Error) => void): () => void {
