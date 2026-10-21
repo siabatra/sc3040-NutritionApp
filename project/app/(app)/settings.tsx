@@ -9,14 +9,16 @@ import {
   Switch, 
   Alert,
   ActivityIndicator,
-  Platform
+  Platform,
+  Modal
 } from 'react-native';
 import { router } from 'expo-router';
 import { auth, db } from '../../firebaseConfig';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { updateEmail, signOut } from 'firebase/auth';
-import { ArrowLeft, Save, Mail, User, Scale, Ruler, Calendar, CircleUser as UserCircle, Activity, Heart, Moon, LogOut } from 'lucide-react-native';
+import { ArrowLeft, Save, Mail, User, Scale, Ruler, Calendar, CircleUser as UserCircle, Activity, Heart, Moon, LogOut, Trash2 } from 'lucide-react-native';
 import { ThemeContext } from '../../context/ThemeContext';
+import { deleteAccount, accountDeletionErrorMessage } from '../../utils/accountDeletion';
 
 interface UserSettings {
   name?: string;
@@ -78,6 +80,10 @@ const SettingsScreen: React.FC = () => {
   const [selectedDietary, setSelectedDietary] = useState<string[]>([]);
   const [editEmail, setEditEmail] = useState<boolean>(false);
   const [newEmail, setNewEmail] = useState<string>('');
+  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
+  const [deletePassword, setDeletePassword] = useState<string>('');
+  const [deleting, setDeleting] = useState<boolean>(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const { theme, toggleTheme } = useContext(ThemeContext);
   const isDark = theme === 'dark';
@@ -236,6 +242,38 @@ const SettingsScreen: React.FC = () => {
     } catch (error) {
       console.error('Error signing out:', error);
       Alert.alert('Error', 'Failed to sign out. Please try again.');
+    }
+  };
+
+  const closeDeleteModal = () => {
+    if (deleting) return;
+    setShowDeleteModal(false);
+    setDeletePassword('');
+    setDeleteError(null);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!auth.currentUser) {
+      setDeleteError('You must be logged in to delete your account');
+      return;
+    }
+    if (!deletePassword) {
+      setDeleteError('Please enter your password to confirm');
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError(null);
+
+    try {
+      await deleteAccount(auth.currentUser, deletePassword);
+      setShowDeleteModal(false);
+      router.replace('/(auth)');
+    } catch (error) {
+      console.error('Error deleting account:', error);
+      setDeleteError(accountDeletionErrorMessage(error));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -576,7 +614,65 @@ const SettingsScreen: React.FC = () => {
         <LogOut size={18} color="#ff6b6b" />
         <Text style={styles.logoutText}>Sign Out</Text>
       </TouchableOpacity>
+
+      <TouchableOpacity 
+        style={[styles.deleteAccountButton, isDark && styles.deleteAccountButtonDark]}
+        onPress={() => setShowDeleteModal(true)}
+      >
+        <Trash2 size={18} color="#d63031" />
+        <Text style={styles.deleteAccountText}>Delete Account</Text>
+      </TouchableOpacity>
     </View>
+  );
+
+  const renderDeleteModal = () => (
+    <Modal
+      visible={showDeleteModal}
+      transparent
+      animationType="fade"
+      onRequestClose={closeDeleteModal}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={[styles.modalCard, isDark && styles.sectionDark]}>
+          <Text style={styles.modalTitle}>Delete Account</Text>
+          <Text style={[styles.modalText, isDark && styles.infoNoteDark]}>
+            This permanently deletes your account, profile, meal logs, meal plans and analytics. This cannot be undone.
+          </Text>
+          <Text style={[styles.label, styles.modalLabel, isDark && styles.textLight]}>Enter your password to confirm</Text>
+          <TextInput
+            style={[styles.input, isDark && styles.inputDark]}
+            value={deletePassword}
+            onChangeText={setDeletePassword}
+            placeholder="Password"
+            placeholderTextColor={isDark ? "#777" : undefined}
+            secureTextEntry
+            autoCapitalize="none"
+            editable={!deleting}
+          />
+          {deleteError && <Text style={styles.modalError}>{deleteError}</Text>}
+          <View style={styles.modalActions}>
+            <TouchableOpacity
+              style={[styles.cancelButton, styles.modalButton, isDark && styles.cancelButtonDark]}
+              onPress={closeDeleteModal}
+              disabled={deleting}
+            >
+              <Text style={[styles.cancelButtonText, isDark && styles.textLight]}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalDeleteButton, deleting && styles.modalDeleteButtonDisabled]}
+              onPress={handleDeleteAccount}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Text style={styles.modalDeleteText}>Delete</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 
   if (loading) {
@@ -632,6 +728,7 @@ const SettingsScreen: React.FC = () => {
         {renderNutritionSection()}
         {renderAppSection()}
       </ScrollView>
+      {renderDeleteModal()}
     </View>
   );
 };
@@ -918,6 +1015,77 @@ const styles = StyleSheet.create({
     color: '#ff6b6b',
     fontWeight: 'bold',
     marginLeft: 8,
+  },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#d63031',
+  },
+  deleteAccountButtonDark: {
+    borderColor: '#ff6b6b',
+  },
+  deleteAccountText: {
+    color: '#d63031',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#d63031',
+    marginBottom: 12,
+  },
+  modalText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+  },
+  modalLabel: {
+    marginLeft: 0,
+    marginBottom: 8,
+  },
+  modalError: {
+    color: '#d63031',
+    marginTop: 8,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 20,
+  },
+  modalButton: {
+    minWidth: 90,
+    alignItems: 'center',
+    marginLeft: 12,
+  },
+  modalDeleteButton: {
+    backgroundColor: '#d63031',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  modalDeleteButtonDisabled: {
+    opacity: 0.7,
+  },
+  modalDeleteText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
   infoCard: {
     backgroundColor: '#f0f9ff',

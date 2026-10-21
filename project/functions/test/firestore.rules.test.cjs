@@ -71,6 +71,28 @@ test('meal ownership cannot be reassigned and plans remain private', async () =>
   await assertFails(client.getDoc(client.doc(bob, 'users/alice/plans/2026-09-15')));
 });
 
+test('account deletion removes only the owner profile, plans and meal logs', async () => {
+  const alice = environment.authenticatedContext('alice').firestore();
+  const service = serviceFor(alice, 'accountDeletion');
+  await adminDb.doc('users/alice').set({ dailyCalorieTarget: 2000 });
+  await adminDb.doc('users/bob').set({ dailyCalorieTarget: 1800 });
+  const meals = adminDb.batch();
+  for (let index = 0; index < 450; index += 1) meals.set(adminDb.doc(`mealLogs/alice-${index}`), { userId: 'alice', ...nutrition });
+  await meals.commit();
+  await adminDb.doc('mealLogs/bob-meal').set({ userId: 'bob', ...nutrition });
+  await adminDb.doc('users/alice/plans/2026-09-15').set({ slots: [slot] });
+  await adminDb.doc('users/bob/plans/2026-09-15').set({ slots: [slot] });
+  await service.deleteUserData('alice');
+  assert.equal((await adminDb.doc('users/alice').get()).exists, false);
+  assert.equal((await adminDb.collection('users/alice/plans').get()).size, 0);
+  assert.equal((await adminDb.collection('mealLogs').where('userId', '==', 'alice').get()).size, 0);
+  assert.equal((await adminDb.doc('users/bob').get()).exists, true);
+  assert.equal((await adminDb.doc('users/bob/plans/2026-09-15').get()).exists, true);
+  assert.equal((await adminDb.doc('mealLogs/bob-meal').get()).exists, true);
+  await assertFails(serviceFor(environment.authenticatedContext('mallory').firestore(), 'accountDeletion').deleteUserData('bob'));
+  assert.equal((await adminDb.doc('users/bob').get()).exists, true);
+});
+
 test('actual frontend plan save/log/delete flow is atomic, retains plans, and produces rollups', async () => {
   const alice = environment.authenticatedContext('alice').firestore();
   const service = serviceFor(alice);
