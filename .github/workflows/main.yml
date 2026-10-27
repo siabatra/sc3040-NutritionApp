@@ -37,7 +37,7 @@ jobs:
       - name: No API keys or private keys in tracked files
         run: |
           # Google API keys, Anthropic keys, OpenAI keys, PEM private keys, service-account JSON.
-          patterns='AIza[0-9A-Za-z_-]{35}|\bsk-ant-[A-Za-z0-9_-]{20,}|\bsk-(proj-)?[A-Za-z0-9_-]{32,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"private_key_id"'
+          patterns='AIza[0-9A-Za-z_-]{35}|\bsk-ant-[A-Za-z0-9_-]{20,}|\bsk-(proj-)?[A-Za-z0-9_-]{32,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"private_key_[i]d"'
           if git ls-files -z | xargs -0 grep -nIE "$patterns" --; then
             echo "::error::Possible secret found above. Remove it and rotate the key."
             exit 1
