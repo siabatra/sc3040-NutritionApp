@@ -1,0 +1,149 @@
+# MealCare continuous integration.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No credential files are tracked
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$|serviceAccountKey[^/]*\.json$|firebase-adminsdk[^/]*\.json$'; then
+            echo "::error::A credential file is committed. Remove it and rotate the key."
+            exit 1
+          fi
+          echo "No .env or Firebase Admin key files are tracked."
+
+      - name: No API keys or private keys in tracked files
+        run: |
+          # Google API keys, Anthropic keys, OpenAI keys, PEM private keys, service-account JSON.
+          patterns='AIza[0-9A-Za-z_-]{35}|\bsk-ant-[A-Za-z0-9_-]{20,}|\bsk-(proj-)?[A-Za-z0-9_-]{32,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"private_key_[i]d"'
+          if git ls-files -z | xargs -0 grep -nIE "$patterns" --; then
+            echo "::error::Possible secret found above. Remove it and rotate the key."
+            exit 1
+          fi
+          echo "No secrets found."
+
+  server-tests:
+    name: Server and AI client tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: project/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run tests with coverage
+        run: |
+          mkdir -p coverage
+          node --test --experimental-test-coverage \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=lcov --test-reporter-destination=coverage/server.lcov.info \
+            server/*.test.js | tee coverage/server-output.txt
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          {
+            echo "### Server and AI client coverage"
+            echo '```'
+            sed -n '/start of coverage report/,/end of coverage report/p' coverage/server-output.txt | sed 's/^ℹ //'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: server-coverage
+          path: project/coverage/
+
+  analytics-and-rules-tests:
+    name: Analytics and Firestore rules tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            project/package-lock.json
+            project/functions/package-lock.json
+
+      # The Firestore emulator runs on Java.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Cache Firebase emulators
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ hashFiles('project/functions/package-lock.json') }}
+
+      # The rules tests load the app's own TypeScript service code, so both installs are needed.
+      - name: Install dependencies
+        run: |
+          npm ci --no-audit --no-fund --prefix project
+          npm ci --no-audit --no-fund --prefix project/functions
+
+      - name: Analytics unit tests with coverage
+        working-directory: project/functions
+        run: |
+          mkdir -p coverage
+          node --test --experimental-test-coverage \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=lcov --test-reporter-destination=coverage/analytics.lcov.info \
+            test/aggregate.test.js | tee coverage/analytics-output.txt
+
+      - name: Firestore Security Rules tests (emulator)
+        working-directory: project/functions
+        run: npm run test:rules
+
+      - name: Coverage summary
+        if: always()
+        working-directory: project/functions
+        run: |
+          {
+            echo "### Analytics coverage"
+            echo '```'
+            sed -n '/start of coverage report/,/end of coverage report/p' coverage/analytics-output.txt | sed 's/^ℹ //'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: analytics-coverage
+          path: project/functions/coverage/
