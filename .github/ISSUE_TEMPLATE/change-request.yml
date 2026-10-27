@@ -1,0 +1,86 @@
+name: Change request (CR)
+description: Propose a change to a baselined artefact (SRS, architecture, plans). Reviewed by the Change Control Board.
+title: "CR-XXX: <short title>"
+labels: ["change-request", "ccb-open"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Process:** 1 Generate → 2 Log → 3 Evaluate → 4 Authorize (CCB) → 5 Implement.
+        Change Control Board: Aanya (PM, chair) · Adit (Lead Dev & QA) · Saanvi (Release) · Sponsor for scope changes.
+
+  - type: dropdown
+    id: baseline
+    attributes:
+      label: Baseline affected
+      options:
+        - SRS (Lab 2)
+        - Architecture (Lab 3)
+        - Project / Risk / Test plan
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: affects
+    attributes:
+      label: Affects
+      options:
+        - label: Scope
+        - label: Schedule
+        - label: Cost
+        - label: Product
+        - label: Quality
+        - label: Risk
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 1 · Generate — what change is requested, and why?
+      placeholder: Current situation, proposed change, reason.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: 3 · Evaluate — impact
+      description: Effort (person-days), schedule, cost, risks (risk IDs), acceptance criteria, documents to update.
+      value: |
+        - **Effort:**
+        - **Schedule:**
+        - **Cost:**
+        - **Risks:**
+        - **Acceptance criteria:**
+        - **Documents to update:**
+    validations:
+      required: true
+
+  - type: dropdown
+    id: decision
+    attributes:
+      label: 4 · Authorize — CCB decision
+      options:
+        - Pending
+        - Approved
+        - Rejected
+        - Deferred
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: 5 · Implement — commits, pull requests and updated documents
+      placeholder: Link the PR and list the documents updated in the same revision.
